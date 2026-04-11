@@ -205,10 +205,66 @@
     }
     .footer a { color: #999999; text-decoration: none; }
 
+    /* ── Product Reference Cards ── */
+    .ref-section-header {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #aaaaaa;
+      border-top: 1px solid #eeeeee;
+      padding-top: 22px;
+      margin: 28px 0 16px;
+    }
+    .ref-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+      gap: 12px;
+      margin: 0 0 32px;
+    }
+    .ref-card {
+      border: 1px solid #e8e8e8;
+      text-decoration: none;
+      display: block;
+    }
+    .ref-card:hover { border-color: #111111; }
+    .ref-img {
+      width: 100%;
+      height: 120px;
+      object-fit: cover;
+      display: block;
+      border-bottom: 1px solid #e8e8e8;
+    }
+    .ref-info { padding: 8px 10px 10px; }
+    .ref-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: #111111;
+      margin: 0 0 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ref-meta {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 10px;
+      color: #aaaaaa;
+      letter-spacing: 0.5px;
+      margin: 0 0 3px;
+    }
+    .ref-specs {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 10px;
+      color: #888888;
+      margin: 0;
+      line-height: 1.4;
+    }
+
     /* ── Mobile ── */
     @media (max-width: 600px) {
       .wrap { margin: 0; border: none; }
       .header, .body, .footer { padding-left: 24px; padding-right: 24px; }
+      .ref-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -274,6 +330,27 @@
       <li>{{ item | safe }}</li>
       {% endfor %}
     </ul>
+    {% endif %}
+
+    <!-- Product References from Catalogue -->
+    {% set real_refs = [] %}
+    {% if referenced_products %}{% for r in referenced_products %}{% if r.blob_url and not r.blob_url.startswith('[') %}{% if real_refs.append(r) %}{% endif %}{% endif %}{% endfor %}{% endif %}
+    {% if real_refs and real_refs|length > 0 %}
+    <p class="ref-section-header">From Our Catalogue</p>
+    <div class="ref-grid">
+      {% for ref in real_refs %}
+      <a class="ref-card" href="{{ ref.blob_url }}" target="_blank">
+        <img class="ref-img" src="{{ ref.blob_url }}" alt="{{ ref.product_name }}" loading="lazy">
+        <div class="ref-info">
+          <p class="ref-name">{{ ref.product_name }}</p>
+          <p class="ref-meta">{{ ref.catalogue_name }} · Pg {{ ref.page_number }}</p>
+          {% if ref.specs_preview %}
+          <p class="ref-specs">{{ ref.specs_preview }}</p>
+          {% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
     {% endif %}
 
     <!-- CTA -->

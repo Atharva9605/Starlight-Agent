@@ -11,9 +11,11 @@ Required .env variables:
                                    (e.g. text-embedding-3-large)
 """
 import os
+import io
+import base64
 import time
 import logging
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 from dotenv import load_dotenv
 from openai import AzureOpenAI, RateLimitError, APIError
@@ -148,6 +150,86 @@ class AzureOpenAIManager:
             sorted_data = sorted(response.data, key=lambda x: x.index)
             all_embeddings.extend(d.embedding for d in sorted_data)
         return all_embeddings
+
+    def vision_completion(
+        self,
+        image_bytes: bytes,
+        text_prompt: str,
+        system_prompt: str = "",
+        image_mime: str = "image/png",
+        temperature: float = 0.0,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+        max_retries: int = 4,
+    ) -> str:
+        """
+        Send an image + text prompt to a vision-capable GPT-4o deployment.
+
+        The image is base64-encoded and sent inline (data URI).  This works
+        regardless of whether the image is publicly accessible.
+
+        Args:
+            image_bytes:   Raw bytes of the image (PNG / JPEG).
+            text_prompt:   The user-side text instruction.
+            system_prompt: Optional system message.
+            image_mime:    MIME type, default "image/png".
+            temperature:   Sampling temperature.
+            max_tokens:    Max tokens in the completion.
+            json_mode:     Force JSON-object output format.
+            max_retries:   Retry attempts on RateLimitError.
+
+        Returns:
+            Generated text as a plain string.
+        """
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        data_url = f"data:{image_mime};base64,{image_b64}"
+
+        messages: List[Dict[str, Any]] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url, "detail": "high"},
+                },
+                {
+                    "type": "text",
+                    "text": text_prompt,
+                },
+            ],
+        })
+
+        kwargs: Dict[str, Any] = {
+            "model": self.chat_deployment,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        wait = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+                return response.choices[0].message.content or ""
+            except RateLimitError:
+                if attempt == max_retries:
+                    raise
+                log.warning(
+                    "Vision rate limit (attempt %d/%d). Retrying in %ds…",
+                    attempt + 1, max_retries, wait,
+                )
+                time.sleep(wait)
+                wait = min(wait * 2, 60)
+            except APIError as exc:
+                log.error("Azure OpenAI vision API error: %s", exc)
+                raise
+
+        return ""
 
 
 # ---------------------------------------------------------------------------
