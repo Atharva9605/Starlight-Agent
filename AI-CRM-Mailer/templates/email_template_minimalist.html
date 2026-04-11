@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ subject }}</title>
+  <style>
+    /* Minimalist Elegance */
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background-color: #fcfcfc;
+      color: #222222;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .email-container {
+      width: 100%;
+      max-width: 800px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border: 1px solid #eeeeee;
+    }
+
+    .logo-banner {
+      padding: 48px 48px 24px 48px;
+      text-align: left;
+    }
+
+    .logo-banner img {
+      height: 36px;
+    }
+
+    .email-body {
+      padding: 0 60px 60px 60px;
+    }
+
+    .hero-greeting {
+      font-size: 24px;
+      font-weight: 400;
+      color: #111111;
+      margin: 0 0 24px 0;
+      line-height: 1.4;
+      border-bottom: 2px solid #111111;
+      padding-bottom: 16px;
+      letter-spacing: -0.5px;
+    }
+
+    .intro-text {
+      font-size: 17px;
+      line-height: 1.9;
+      color: #555555;
+      margin-bottom: 50px;
+    }
+
+    .feature-list {
+      margin: 40px 0;
+      border-top: 1px solid #eeeeee;
+    }
+
+    .feature-item {
+      padding: 24px 0;
+      border-bottom: 1px solid #eeeeee;
+      display: flex;
+      align-items: flex-start;
+    }
+
+    .feature-icon {
+      font-size: 18px;
+      margin-right: 20px;
+      color: #111111;
+      margin-top: 2px;
+    }
+
+    .feature-content {
+      flex-grow: 1;
+    }
+
+    .feature-text {
+      font-size: 16px;
+      line-height: 1.7;
+      color: #444444;
+      margin: 0;
+    }
+
+    .content-block {
+      margin-bottom: 40px;
+    }
+
+    .content-block-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #888888;
+      margin: 0 0 16px 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .content-list {
+      margin: 0;
+      padding-left: 0;
+      list-style: none;
+    }
+
+    .content-list li {
+      position: relative;
+      padding-left: 20px;
+      margin-bottom: 20px;
+      font-size: 16px;
+      color: #555555;
+      line-height: 1.8;
+    }
+
+    .content-list li::before {
+      content: "—";
+      position: absolute;
+      left: 0;
+      color: #111111;
+    }
+
+    .cta-container {
+      margin: 56px 0 40px 0;
+      text-align: left;
+    }
+
+    .cta-button {
+      display: inline-block;
+      background-color: #111111;
+      color: #ffffff !important;
+      text-decoration: none;
+      font-size: 13px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 16px 32px;
+      transition: background-color 0.2s;
+    }
+
+    .cta-button:hover {
+      background-color: #333333;
+    }
+
+    .signature-block {
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid #eeeeee;
+      text-align: left;
+    }
+
+    .signature-name {
+      font-size: 16px;
+      font-weight: 500;
+      color: #111111;
+      margin: 0 0 4px 0;
+    }
+
+    .signature-details {
+      font-size: 13px;
+      color: #888888;
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    .signature-link {
+      color: #111111;
+      text-decoration: none;
+      border-bottom: 1px solid #111111;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="email-container">
+    <div class="logo-banner">
+      <a href="{{ sender_website }}" target="_blank">
+        <img src="{{ company_logo_url }}" alt="{{ sender_company }}">
+      </a>
+    </div>
+    <div class="email-body">
+      <div class="hero-greeting">{{ subject }}</div>
+
+      <div class="intro-text">
+        {% if opening_line %}<p><strong>{{ opening_line }}</strong></p>{% endif %}
+        <p>{{ intro_paragraph|safe }}</p>
+      </div>
+
+      {% set solution_bullets = bullets if bullets and bullets|length > 0 else feature_highlights if feature_highlights
+      and feature_highlights|length > 0 else [] %}
+      {% if solution_bullets and solution_bullets|length > 0 %}
+      <div class="feature-list">
+        {% for item in solution_bullets %}
+        <div class="feature-item">
+          <div class="feature-icon">{% if loop.index == 1 %}01{% elif loop.index == 2 %}02{% elif loop.index == 3 %}03{%
+            else %}04{% endif %}</div>
+          <div class="feature-content">
+            <p class="feature-text">{{ item|safe }}</p>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if use_cases and use_cases|length > 0 %}
+      <div class="content-block">
+        <h3 class="content-block-title">Applications</h3>
+        <ul class="content-list">
+          {% for item in use_cases %}
+          <li>{{ item|safe }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if technical_specs and technical_specs|length > 0 %}
+      <div class="content-block">
+        <h3 class="content-block-title">Technical Details</h3>
+        <ul class="content-list">
+          {% for item in technical_specs %}
+          <li>{{ item|safe }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <div class="intro-text" style="margin-bottom: 0;">
+        <p>{{ closing_paragraph|safe }}</p>
+      </div>
+
+      <div class="cta-container">
+        <a class="cta-button" href="mailto:{{ sender_email }}?subject=Inquiry from {{ subject }}&body=Hi Vivek,"
+          target="_blank">Start Partnership</a>
+      </div>
+
+      <div class="signature-block">
+        <p class="signature-name">{{ sender_name }}</p>
+        <p class="signature-details">
+          {{ sender_company }}<br>
+          {{ sender_phone }}<br>
+          <a class="signature-link" href="{{ sender_website }}" target="_blank">www.starlightlinearled.com</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>

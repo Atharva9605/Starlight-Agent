@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ subject }}</title>
+  <style>
+    /* Base Reset & Typography */
+    body,
+    html {
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, 'Segoe UI', Inter, sans-serif;
+      background-color: #f0f4f8;
+      /* Softer, modern gray background */
+      color: #1a202c;
+      /* Darker text for readability */
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Main Container */
+    .email-container {
+      width: 100%;
+      max-width: 800px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05), 0 4px 10px rgba(0, 0, 0, 0.03);
+      overflow: hidden;
+    }
+
+    /* Header / Logo Section */
+    .logo-banner {
+      padding: 40px 40px 20px 40px;
+      text-align: center;
+    }
+
+    .logo-banner img {
+      height: 52px;
+      display: inline-block;
+    }
+
+    /* Body Padding */
+    .email-body {
+      padding: 0 60px 60px 60px;
+    }
+
+    /* Hero Greeting */
+    .hero-greeting {
+      font-size: 28px;
+      font-weight: 700;
+      color: #1a202c;
+      margin: 16px 0 16px 0;
+      line-height: 1.3;
+      text-align: center;
+      letter-spacing: -0.5px;
+    }
+
+    /* Main Intro Text */
+    .intro-text {
+      font-size: 18px;
+      line-height: 1.8;
+      color: #4a5568;
+      text-align: center;
+      margin-bottom: 50px;
+    }
+
+    .intro-text p {
+      margin: 0 0 16px 0;
+    }
+
+    /* Feature List (Card Style) */
+    .feature-list {
+      margin: 32px 0;
+      display: grid;
+      gap: 16px;
+    }
+
+    .feature-item {
+      display: flex;
+      align-items: center;
+      padding: 20px;
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .feature-item:hover {
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      flex-shrink: 0;
+      width: 50px;
+      height: 50px;
+      background: linear-gradient(135deg, #e4f2ff, #cde4ff);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 20px;
+      color: #0052cc;
+      font-size: 24px;
+      box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.5);
+    }
+
+    .feature-content {
+      flex-grow: 1;
+      text-align: left;
+    }
+
+    .feature-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #2d3748;
+      margin: 0 0 8px 0;
+    }
+
+    .feature-text {
+      font-size: 16px;
+      line-height: 1.7;
+      color: #718096;
+      margin: 0;
+    }
+
+    /* Catalog Expansion on Hover */
+    .catalog-details {
+      display: none;
+      margin-top: 16px;
+      padding: 16px;
+      background: #f8fafc;
+      border-left: 4px solid #0052cc;
+      border-radius: 4px;
+      font-size: 14px;
+      color: #4a5568;
+      line-height: 1.6;
+      text-align: left;
+    }
+
+    /* Important: use hover on the parent item to display the details */
+    .feature-item:hover .catalog-details {
+      display: block;
+      animation: fadeIn 0.3s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Standard Text Blocks */
+    .content-block {
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.02);
+    }
+
+    .content-block-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #2d3748;
+      margin: 0 0 16px 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .content-block-title span {
+      margin-right: 12px;
+      font-size: 20px;
+    }
+
+    .content-list {
+      margin: 0;
+      padding-left: 20px;
+      color: #4a5568;
+      line-height: 1.8;
+      font-size: 17px;
+    }
+
+    .content-list li {
+      margin-bottom: 12px;
+    }
+
+    .content-list li:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Call to Action */
+    .cta-container {
+      text-align: center;
+      margin: 48px 0;
+    }
+
+    .cta-button {
+      display: inline-block;
+      background: linear-gradient(135deg, #0052cc, #0043a8);
+      color: #ffffff !important;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 600;
+      padding: 16px 36px;
+      border-radius: 30px;
+      /* More rounded pill shape */
+      box-shadow: 0 10px 20px rgba(0, 82, 204, 0.25);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .cta-button:hover {
+      box-shadow: 0 12px 24px rgba(0, 82, 204, 0.35);
+      background: linear-gradient(135deg, #0043a8, #00368c);
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background-color: #e2e8f0;
+      margin: 32px 0;
+    }
+
+    /* Footer & Signature */
+    .signature-block {
+      text-align: center;
+      margin-top: 32px;
+    }
+
+    .signature-name {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1a202c;
+      margin: 0 0 6px 0;
+    }
+
+    .signature-details {
+      font-size: 14px;
+      color: #718096;
+      margin: 0 0 16px 0;
+      line-height: 1.6;
+    }
+
+    .signature-link {
+      color: #3182ce;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    /* Mobile Responsiveness */
+    @media only screen and (max-width: 600px) {
+      .email-container {
+        margin: 16px !important;
+        border-radius: 16px !important;
+        width: auto !important;
+      }
+
+      .logo-banner {
+        padding: 32px 24px 16px 24px;
+      }
+
+      .email-body {
+        padding: 0 24px 32px 24px;
+      }
+
+      .hero-greeting {
+        font-size: 24px;
+      }
+
+      .feature-item {
+        padding: 16px;
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .feature-icon {
+        margin: 0 0 16px 0;
+      }
+
+      .feature-content {
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="email-container">
+    <!-- Header / Logo -->
+    <div class="logo-banner">
+      <a href="{{ sender_website }}" target="_blank">
+        <img src="{{ company_logo_url }}" alt="{{ sender_company }}">
+      </a>
+    </div>
+
+    <div class="email-body">
+      <!-- Title -->
+      <div class="hero-greeting">{{ subject }}</div>
+
+      <!-- Opening / Intro -->
+      <div class="intro-text">
+        {% if opening_line %}
+        <p><strong>{{ opening_line }}</strong></p>
+        {% endif %}
+        <p>{{ intro_paragraph|safe }}</p>
+      </div>
+
+      <!-- Features Section (Modern Cards) -->
+      {% set solution_bullets = bullets if bullets and bullets|length > 0 else feature_highlights if feature_highlights
+      and feature_highlights|length > 0 else [] %}
+      {% if solution_bullets and solution_bullets|length > 0 %}
+      <div class="feature-list">
+        {% for item in solution_bullets %}
+        <div class="feature-item">
+          <div style="display: flex; align-items: center; width: 100%;">
+            <!-- Dynamic simple icon representation -->
+            <div class="feature-icon">
+              {% if loop.index == 1 %}💡{% elif loop.index == 2 %}📐{% elif loop.index == 3 %}✨{% else %}🚀{% endif %}
+            </div>
+            <div class="feature-content">
+              <p class="feature-text">{{ item|safe }}</p>
+            </div>
+          </div>
+          
+          <!-- Hidden Catalog Details (Expanded on Hover) -->
+          {% if catalog_chunks and catalog_chunks|length > 0 %}
+            <div class="catalog-details">
+              <strong>Catalog Context:</strong><br>
+              <div style="max-height: 150px; overflow-y: auto;">
+                {% for chunk in catalog_chunks %}
+                  <p style="margin: 8px 0; font-size: 13px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
+                    {{ chunk|replace('\n', '<br>')|safe }}
+                  </p>
+                {% endfor %}
+              </div>
+            </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Use Cases & Specs -->
+      {% if use_cases and use_cases|length > 0 %}
+      <div class="content-block">
+        <h3 class="content-block-title"><span>🎯</span> Applications</h3>
+        <ul class="content-list">
+          {% for item in use_cases %}
+          <li>{{ item|safe }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if technical_specs and technical_specs|length > 0 %}
+      <div class="content-block">
+        <h3 class="content-block-title"><span>⚙️</span> Technical Details</h3>
+        <ul class="content-list">
+          {% for item in technical_specs %}
+          <li>{{ item|safe }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <!-- Closing Call to Action text -->
+      <div class="intro-text" style="text-align: left; margin-bottom: 24px;">
+        <p>{{ closing_paragraph|safe }}</p>
+      </div>
+
+      <!-- CTA Button -->
+      <div class="cta-container">
+        <a class="cta-button" href="mailto:{{ sender_email }}?subject=Inquiry from {{ subject }}&body=Hi Vivek,"
+          target="_blank">Let's Connect</a>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Signature -->
+      <div class="signature-block">
+        <p class="signature-name">{{ sender_name }}</p>
+        <p class="signature-details">
+          {{ sender_company }}<br>
+          {{ sender_phone }}<br>
+          <a class="signature-link" href="{{ sender_website }}" target="_blank">www.starlightlinearled.com</a>
+        </p>
+      </div>
+
+    </div>
+  </div>
+</body>
+
+</html>
