@@ -1,249 +1,313 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ subject }}</title>
   <style>
-    /* Minimalist Elegance */
-    body,
-    html {
-      margin: 0;
-      padding: 0;
-      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      background-color: #fcfcfc;
-      color: #222222;
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; background: #fafafa; }
+    body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      color: #111111;
       -webkit-font-smoothing: antialiased;
     }
 
-    .email-container {
-      width: 100%;
-      max-width: 800px;
-      margin: 40px auto;
-      background-color: #ffffff;
-      border: 1px solid #eeeeee;
+    /* ── Wrapper ── */
+    .wrap {
+      max-width: 620px;
+      margin: 48px auto;
+      background: #ffffff;
+      border: 1px solid #e5e5e5;
     }
 
-    .logo-banner {
-      padding: 48px 48px 24px 48px;
-      text-align: left;
+    /* ── Top rule ── */
+    .top-rule {
+      height: 3px;
+      background: #111111;
     }
 
-    .logo-banner img {
-      height: 36px;
-    }
-
-    .email-body {
-      padding: 0 60px 60px 60px;
-    }
-
-    .hero-greeting {
-      font-size: 24px;
-      font-weight: 400;
-      color: #111111;
-      margin: 0 0 24px 0;
-      line-height: 1.4;
-      border-bottom: 2px solid #111111;
-      padding-bottom: 16px;
-      letter-spacing: -0.5px;
-    }
-
-    .intro-text {
-      font-size: 17px;
-      line-height: 1.9;
-      color: #555555;
-      margin-bottom: 50px;
-    }
-
-    .feature-list {
-      margin: 40px 0;
-      border-top: 1px solid #eeeeee;
-    }
-
-    .feature-item {
-      padding: 24px 0;
-      border-bottom: 1px solid #eeeeee;
-      display: flex;
-      align-items: flex-start;
-    }
-
-    .feature-icon {
-      font-size: 18px;
-      margin-right: 20px;
-      color: #111111;
-      margin-top: 2px;
-    }
-
-    .feature-content {
-      flex-grow: 1;
-    }
-
-    .feature-text {
-      font-size: 16px;
-      line-height: 1.7;
-      color: #444444;
-      margin: 0;
-    }
-
-    .content-block {
-      margin-bottom: 40px;
-    }
-
-    .content-block-title {
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      color: #888888;
-      margin: 0 0 16px 0;
+    /* ── Header ── */
+    .header {
+      padding: 32px 48px 20px;
       display: flex;
       align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .header img { height: 32px; }
+    .header-date {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      color: #aaaaaa;
+      letter-spacing: 1px;
     }
 
-    .content-list {
-      margin: 0;
-      padding-left: 0;
-      list-style: none;
+    /* ── Body ── */
+    .body {
+      padding: 40px 48px 44px;
     }
 
-    .content-list li {
-      position: relative;
-      padding-left: 20px;
-      margin-bottom: 20px;
-      font-size: 16px;
-      color: #555555;
-      line-height: 1.8;
-    }
-
-    .content-list li::before {
-      content: "—";
-      position: absolute;
-      left: 0;
+    /* ── Subject ── */
+    .subject-line {
+      font-size: 22px;
+      font-weight: 400;
       color: #111111;
+      line-height: 1.4;
+      margin: 0 0 10px;
+      letter-spacing: -0.2px;
+    }
+    .subject-rule {
+      height: 1px;
+      background: #111111;
+      margin: 0 0 28px;
+      width: 48px;
     }
 
-    .cta-container {
-      margin: 56px 0 40px 0;
-      text-align: left;
-    }
-
-    .cta-button {
-      display: inline-block;
-      background-color: #111111;
-      color: #ffffff !important;
-      text-decoration: none;
+    /* ── Opening / intro ── */
+    .opening {
+      font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 13px;
+      font-weight: 600;
+      color: #888888;
       letter-spacing: 1px;
       text-transform: uppercase;
-      padding: 16px 32px;
-      transition: background-color 0.2s;
+      margin: 0 0 12px;
     }
-
-    .cta-button:hover {
-      background-color: #333333;
-    }
-
-    .signature-block {
-      margin-top: 40px;
-      padding-top: 24px;
-      border-top: 1px solid #eeeeee;
-      text-align: left;
-    }
-
-    .signature-name {
+    .intro {
       font-size: 16px;
-      font-weight: 500;
-      color: #111111;
-      margin: 0 0 4px 0;
+      line-height: 1.95;
+      color: #333333;
+      margin: 0 0 36px;
     }
 
-    .signature-details {
-      font-size: 13px;
-      color: #888888;
+    /* ── Section header ── */
+    .section-header {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #aaaaaa;
+      border-top: 1px solid #eeeeee;
+      padding-top: 22px;
+      margin: 0 0 18px;
+    }
+
+    /* ── Features list ── */
+    .feat-list { margin: 0 0 30px; padding: 0; list-style: none; }
+    .feat-list li {
+      font-size: 15px;
+      line-height: 1.75;
+      color: #333333;
+      padding: 13px 0;
+      border-bottom: 1px solid #f5f5f5;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .feat-list li:last-child { border-bottom: none; }
+    .feat-num {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      color: #aaaaaa;
+      letter-spacing: 1px;
+      flex-shrink: 0;
+      padding-top: 3px;
+    }
+
+    /* ── Item list ── */
+    .item-list { padding: 0; margin: 0 0 28px; list-style: none; }
+    .item-list li {
+      font-size: 15px;
+      line-height: 1.8;
+      color: #444444;
+      padding: 9px 0 9px 18px;
+      position: relative;
+      border-bottom: 1px dashed #f0f0f0;
+    }
+    .item-list li:last-child { border-bottom: none; }
+    .item-list li::before {
+      content: '—';
+      position: absolute;
+      left: 0;
+      color: #cccccc;
+    }
+
+    /* ── CTA ── */
+    .cta-section { margin: 36px 0 32px; }
+    .cta-text {
+      font-size: 16px;
+      line-height: 1.85;
+      color: #333333;
+      margin: 0 0 22px;
+    }
+    .cta-btn {
+      display: inline-block;
+      background: #111111;
+      color: #ffffff !important;
+      text-decoration: none;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 14px 36px;
+    }
+    .cta-btn:hover { background: #333333; }
+
+    /* ── Signature ── */
+    .sig {
+      border-top: 1px solid #eeeeee;
+      padding-top: 28px;
+      margin-top: 32px;
+    }
+    .sig-name {
+      font-size: 15px;
+      font-weight: 400;
+      color: #111111;
+      margin: 0 0 2px;
+    }
+    .sig-details {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+      color: #999999;
+      margin: 0;
+      line-height: 1.8;
+    }
+    .sig-details a { color: #666666; text-decoration: none; border-bottom: 1px solid #dddddd; }
+
+    /* ── Award line ── */
+    .award-line {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      color: #aaaaaa;
+      letter-spacing: 0.5px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #f5f5f5;
+    }
+    .award-line strong { color: #555555; }
+
+    /* ── Footer ── */
+    .footer {
+      background: #f9f9f9;
+      border-top: 1px solid #eeeeee;
+      padding: 18px 48px;
+    }
+    .footer p {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      color: #bbbbbb;
       margin: 0;
       line-height: 1.6;
     }
+    .footer a { color: #999999; text-decoration: none; }
 
-    .signature-link {
-      color: #111111;
-      text-decoration: none;
-      border-bottom: 1px solid #111111;
+    /* ── Mobile ── */
+    @media (max-width: 600px) {
+      .wrap { margin: 0; border: none; }
+      .header, .body, .footer { padding-left: 24px; padding-right: 24px; }
     }
   </style>
 </head>
-
 <body>
-  <div class="email-container">
-    <div class="logo-banner">
-      <a href="{{ sender_website }}" target="_blank">
-        <img src="{{ company_logo_url }}" alt="{{ sender_company }}">
-      </a>
-    </div>
-    <div class="email-body">
-      <div class="hero-greeting">{{ subject }}</div>
+<div class="wrap">
 
-      <div class="intro-text">
-        {% if opening_line %}<p><strong>{{ opening_line }}</strong></p>{% endif %}
-        <p>{{ intro_paragraph|safe }}</p>
-      </div>
+  <!-- Top rule -->
+  <div class="top-rule"></div>
 
-      {% set solution_bullets = bullets if bullets and bullets|length > 0 else feature_highlights if feature_highlights
-      and feature_highlights|length > 0 else [] %}
-      {% if solution_bullets and solution_bullets|length > 0 %}
-      <div class="feature-list">
-        {% for item in solution_bullets %}
-        <div class="feature-item">
-          <div class="feature-icon">{% if loop.index == 1 %}01{% elif loop.index == 2 %}02{% elif loop.index == 3 %}03{%
-            else %}04{% endif %}</div>
-          <div class="feature-content">
-            <p class="feature-text">{{ item|safe }}</p>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      {% if use_cases and use_cases|length > 0 %}
-      <div class="content-block">
-        <h3 class="content-block-title">Applications</h3>
-        <ul class="content-list">
-          {% for item in use_cases %}
-          <li>{{ item|safe }}</li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% endif %}
-
-      {% if technical_specs and technical_specs|length > 0 %}
-      <div class="content-block">
-        <h3 class="content-block-title">Technical Details</h3>
-        <ul class="content-list">
-          {% for item in technical_specs %}
-          <li>{{ item|safe }}</li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% endif %}
-
-      <div class="intro-text" style="margin-bottom: 0;">
-        <p>{{ closing_paragraph|safe }}</p>
-      </div>
-
-      <div class="cta-container">
-        <a class="cta-button" href="mailto:{{ sender_email }}?subject=Inquiry from {{ subject }}&body=Hi Vivek,"
-          target="_blank">Start Partnership</a>
-      </div>
-
-      <div class="signature-block">
-        <p class="signature-name">{{ sender_name }}</p>
-        <p class="signature-details">
-          {{ sender_company }}<br>
-          {{ sender_phone }}<br>
-          <a class="signature-link" href="{{ sender_website }}" target="_blank">www.starlightlinearled.com</a>
-        </p>
-      </div>
-    </div>
+  <!-- Header -->
+  <div class="header">
+    <a href="https://{{ sender_website }}" target="_blank">
+      <img src="{{ company_logo_url }}" alt="{{ sender_company }}">
+    </a>
+    <span class="header-date">{{ sender_company }}</span>
   </div>
-</body>
 
+  <!-- Body -->
+  <div class="body">
+
+    <h1 class="subject-line">{{ subject }}</h1>
+    <div class="subject-rule"></div>
+
+    {% if opening_line %}
+    <p class="opening">{{ opening_line }}</p>
+    {% endif %}
+
+    {% if intro_paragraph %}
+    <p class="intro">{{ intro_paragraph | safe }}</p>
+    {% endif %}
+
+    <!-- Features -->
+    {% set feature_items = bullets if bullets and bullets|length > 0
+                          else feature_highlights if feature_highlights and feature_highlights|length > 0
+                          else [] %}
+    {% if feature_items %}
+    <p class="section-header">Solution Overview</p>
+    <ul class="feat-list">
+      {% for item in feature_items %}
+      <li>
+        <span class="feat-num">0{{ loop.index }}</span>
+        <span>{{ item | safe }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <!-- Applications -->
+    {% if use_cases and use_cases|length > 0 %}
+    <p class="section-header">Applications</p>
+    <ul class="item-list">
+      {% for item in use_cases %}
+      <li>{{ item | safe }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <!-- Specs -->
+    {% if technical_specs and technical_specs|length > 0 %}
+    <p class="section-header">Technical Details</p>
+    <ul class="item-list">
+      {% for item in technical_specs %}
+      <li>{{ item | safe }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <!-- CTA -->
+    <div class="cta-section">
+      <p class="cta-text">{{ closing_paragraph | safe }}</p>
+      <a class="cta-btn"
+         href="mailto:{{ sender_email }}?subject=Re: {{ subject }}&body=Hi {{ sender_name }},"
+         target="_blank">Begin Conversation</a>
+    </div>
+
+    <!-- Signature -->
+    <div class="sig">
+      <p class="sig-name">{{ sender_name }}</p>
+      <p class="sig-details">
+        {{ sender_company }}<br>
+        {{ sender_phone }}&nbsp;&nbsp;·&nbsp;&nbsp;
+        <a href="mailto:{{ sender_email }}">{{ sender_email }}</a><br>
+        <a href="https://{{ sender_website }}" target="_blank">{{ sender_website }}</a>
+      </p>
+      <p class="award-line">
+        <strong>Homes India Magazine</strong> — Top 10 Brands in Lightings for 2025
+      </p>
+    </div>
+
+  </div><!-- /body -->
+
+  <!-- Footer -->
+  <div class="footer">
+    <p>
+      3 Vedant 3, P&T Colony, Gandhi Nagar, Dombivali East, Thane 421203&nbsp;·&nbsp;
+      <a href="https://{{ sender_website }}" target="_blank">{{ sender_website }}</a>
+    </p>
+  </div>
+
+</div>
+</body>
 </html>
