@@ -3,12 +3,13 @@ Azure OpenAI Client Manager for Starlight AI-CRM Mailer.
 Replaces the Gemini key_manager for all generation and embedding tasks.
 
 Required .env variables:
-    AZURE_OPENAI_ENDPOINT        - e.g. https://your-resource.openai.azure.com/
-    AZURE_OPENAI_API_KEY         - Azure OpenAI API key
-    AZURE_OPENAI_API_VERSION     - e.g. 2024-02-01  (defaults provided)
-    AZURE_OPENAI_CHAT_DEPLOYMENT - Your GPT-4o deployment name (e.g. gpt-4o)
-    AZURE_OPENAI_EMBEDDING_DEPLOYMENT - Your embedding deployment name
-                                   (e.g. text-embedding-3-large)
+    AZURE_OPENAI_ENDPOINT             - https://your-resource.openai.azure.com/
+    AZURE_OPENAI_API_KEY              - your Azure OpenAI key
+    AZURE_OPENAI_API_VERSION          - e.g. 2024-12-01-preview
+    AZURE_OPENAI_DEPLOYMENT_NAME      - your GPT-4o deployment name  (e.g. gpt-4o)
+                                        alias: AZURE_OPENAI_CHAT_DEPLOYMENT
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT - your embedding deployment name
+                                        (e.g. text-embedding-ada-002)
 """
 import os
 import io
@@ -33,10 +34,16 @@ class AzureOpenAIManager:
     def __init__(self) -> None:
         self.endpoint: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
         self.api_key: str = os.getenv("AZURE_OPENAI_API_KEY", "")
-        self.api_version: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
-        self.chat_deployment: str = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o")
+        self.api_version: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
+        # Accept either AZURE_OPENAI_DEPLOYMENT_NAME (user's .env) or
+        # AZURE_OPENAI_CHAT_DEPLOYMENT (legacy name) — prefer the former
+        self.chat_deployment: str = (
+            os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+            or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
+            or "gpt-4o"
+        )
         self.embedding_deployment: str = os.getenv(
-            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-3-large"
+            "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002"
         )
 
         if not self.endpoint or not self.api_key:

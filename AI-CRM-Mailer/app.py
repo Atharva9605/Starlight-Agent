@@ -353,7 +353,7 @@ else:
         if st.button("Query Entire Database"):
             try:
                 chroma_client = chromadb.PersistentClient(path="chroma_db")
-                collection = chroma_client.get_collection("starlight_catalogs")
+                collection = chroma_client.get_collection("starlight_vision")
                 results = collection.get()
                 st.write(f"Total Chunks in DB: **{len(results['ids'])}**")
                 if results and results['documents']:
