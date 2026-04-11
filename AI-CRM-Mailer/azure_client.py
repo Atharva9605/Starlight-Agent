@@ -16,13 +16,51 @@ import io
 import base64
 import time
 import logging
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 
 from dotenv import load_dotenv
-from openai import AzureOpenAI, RateLimitError, APIError
+from openai import AzureOpenAI, RateLimitError, APIError, APIConnectionError
 
-load_dotenv()
+# Search for .env starting from this file's directory upward
+_here = Path(__file__).parent
+load_dotenv(dotenv_path=_here / ".env")
+
 log = logging.getLogger("azure_client")
+
+
+def _check_env() -> None:
+    """Raise a descriptive error if required Azure credentials are missing."""
+    missing = []
+    if not os.getenv("AZURE_OPENAI_ENDPOINT", "").strip():
+        missing.append("AZURE_OPENAI_ENDPOINT")
+    if not os.getenv("AZURE_OPENAI_API_KEY", "").strip():
+        missing.append("AZURE_OPENAI_API_KEY")
+
+    if missing:
+        env_path = _here / ".env"
+        raise EnvironmentError(
+            f"\n\n{'='*60}\n"
+            f"  MISSING required environment variables:\n"
+            + "".join(f"    ✗  {v}\n" for v in missing)
+            + f"\n  Create / edit the file:\n"
+            f"    {env_path}\n\n"
+            f"  It must contain:\n"
+            f"    AZURE_OPENAI_ENDPOINT=https://openai-04.openai.azure.com/\n"
+            f"    AZURE_OPENAI_API_KEY=<your key>\n"
+            f"    AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o\n"
+            f"    AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-ada-002\n"
+            f"{'='*60}\n"
+        )
+
+    # Warn if endpoint looks malformed (missing https://)
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+    if endpoint and not endpoint.startswith("https://"):
+        raise EnvironmentError(
+            f"AZURE_OPENAI_ENDPOINT must start with 'https://'\n"
+            f"  Current value: '{endpoint}'\n"
+            f"  Expected:      'https://openai-04.openai.azure.com/'"
+        )
 
 
 class AzureOpenAIManager:
@@ -32,11 +70,12 @@ class AzureOpenAIManager:
     """
 
     def __init__(self) -> None:
-        self.endpoint: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
+        _check_env()   # raises EnvironmentError with clear message if misconfigured
+
+        self.endpoint: str = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/") + "/"
         self.api_key: str = os.getenv("AZURE_OPENAI_API_KEY", "")
         self.api_version: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-        # Accept either AZURE_OPENAI_DEPLOYMENT_NAME (user's .env) or
-        # AZURE_OPENAI_CHAT_DEPLOYMENT (legacy name) — prefer the former
+        # Accept AZURE_OPENAI_DEPLOYMENT_NAME (primary) or legacy AZURE_OPENAI_CHAT_DEPLOYMENT
         self.chat_deployment: str = (
             os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
             or os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT")
@@ -46,12 +85,10 @@ class AzureOpenAIManager:
             "AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002"
         )
 
-        if not self.endpoint or not self.api_key:
-            log.warning(
-                "AZURE_OPENAI_ENDPOINT or AZURE_OPENAI_API_KEY not set. "
-                "Set them in your .env file before running generation."
-            )
-
+        log.info(
+            "Azure OpenAI configured: endpoint=%s  chat=%s  embedding=%s",
+            self.endpoint, self.chat_deployment, self.embedding_deployment,
+        )
         self._client: Optional[AzureOpenAI] = None
 
     @property
