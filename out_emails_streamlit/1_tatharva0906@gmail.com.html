@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Elevate Your Architectural Lighting with Starlight Linear LEDs</title>
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; background: #f1f5f9; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      color: #1e293b;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Outer wrapper ── */
+    .wrap {
+      width: 100%;
+      max-width: 660px;
+      margin: 36px auto;
+    }
+
+    /* ── Header bar ── */
+    .header {
+      background: #0f172a;
+      border-radius: 16px 16px 0 0;
+      padding: 28px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header img { height: 42px; }
+    .header-tagline {
+      font-size: 11px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: #4CAF50;
+      font-weight: 600;
+    }
+
+    /* ── Green accent bar ── */
+    .accent-bar {
+      height: 4px;
+      background: linear-gradient(90deg, #3FA148 0%, #81C784 60%, #3FA148 100%);
+    }
+
+    /* ── Card body ── */
+    .card {
+      background: #ffffff;
+      padding: 44px 48px 40px;
+    }
+
+    /* ── Preamble tagline ── */
+    .preamble {
+      font-size: 11px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: #4CAF50;
+      font-weight: 700;
+      margin: 0 0 18px;
+    }
+
+    /* ── Subject heading ── */
+    .subject-heading {
+      font-size: 26px;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.3;
+      margin: 0 0 24px;
+      letter-spacing: -0.3px;
+    }
+
+    /* ── Opening / intro ── */
+    .opening {
+      font-size: 15px;
+      font-weight: 600;
+      color: #475569;
+      margin: 0 0 6px;
+    }
+    .intro {
+      font-size: 16px;
+      line-height: 1.85;
+      color: #475569;
+      margin: 0 0 32px;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: #e2e8f0;
+      margin: 32px 0;
+    }
+
+    /* ── Feature cards ── */
+    .features { display: grid; gap: 14px; margin: 0 0 32px; }
+    .feat-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      background: #f8fafc;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .feat-card:hover {
+      border-color: #4CAF50;
+      box-shadow: 0 4px 16px rgba(76,175,80,0.15);
+    }
+    .feat-icon {
+      flex-shrink: 0;
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      background: #e8f5e9;
+      color: #2E7D32;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .feat-text {
+      font-size: 15px;
+      line-height: 1.65;
+      color: #334155;
+      margin: 0;
+    }
+
+    /* ── Section blocks ── */
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: #94a3b8;
+      font-weight: 700;
+      margin: 0 0 12px;
+    }
+    .item-list {
+      margin: 0 0 28px;
+      padding: 0;
+      list-style: none;
+    }
+    .item-list li {
+      font-size: 15px;
+      line-height: 1.75;
+      color: #475569;
+      padding: 10px 0 10px 20px;
+      position: relative;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .item-list li:last-child { border-bottom: none; }
+    .item-list li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 18px;
+      width: 8px;
+      height: 4px;
+      background: #4CAF50;
+      border-radius: 2px;
+    }
+
+    /* ── CTA block ── */
+    .cta-block {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin: 24px 0 32px;
+    }
+    .cta-text {
+      font-size: 15px;
+      line-height: 1.75;
+      color: #334155;
+      margin: 0 0 20px;
+    }
+    .cta-btn {
+      display: inline-block;
+      background: #4CAF50;
+      color: #ffffff !important;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 13px 32px;
+      border-radius: 8px;
+    }
+
+    /* ── Signature ── */
+    .sig {
+      padding: 28px 0 0;
+      border-top: 1px solid #e2e8f0;
+    }
+    .sig-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 0 0 4px;
+    }
+    .sig-role {
+      font-size: 13px;
+      color: #64748b;
+      margin: 0 0 8px;
+    }
+    .sig-details {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.7;
+      margin: 0;
+    }
+    .sig-details a {
+      color: #4CAF50;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      background: #0f172a;
+      border-radius: 0 0 16px 16px;
+      padding: 20px 40px;
+      text-align: center;
+    }
+    .footer p {
+      font-size: 11px;
+      color: #475569;
+      margin: 0;
+      line-height: 1.6;
+    }
+    .footer a { color: #4CAF50; text-decoration: none; }
+
+    /* ── Product Reference Cards ── */
+    .ref-section-label {
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: #4CAF50;
+      font-weight: 700;
+      margin: 0 0 14px;
+    }
+    .ref-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin: 0 0 28px;
+    }
+    .ref-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #f8fafc;
+      text-decoration: none;
+    }
+    .ref-card:hover { border-color: #4CAF50; }
+    .ref-img {
+      width: 100%;
+      height: 130px;
+      object-fit: cover;
+      display: block;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .ref-info { padding: 10px 12px; }
+    .ref-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 0 0 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ref-meta {
+      font-size: 10px;
+      color: #94a3b8;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin: 0 0 4px;
+    }
+    .ref-specs {
+      font-size: 11px;
+      color: #64748b;
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    /* ── Mobile ── */
+    @media (max-width: 600px) {
+      .wrap { margin: 0; }
+      .header, .card, .footer { padding-left: 24px; padding-right: 24px; }
+      .subject-heading { font-size: 22px; }
+      .ref-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="header">
+    <a href="https://https://www.starlightlinearled.com" target="_blank">
+      <img src="cid:company_logo" alt="Starlight LED Lighting">
+    </a>
+    <span class="header-tagline">Precision LED Lighting</span>
+  </div>
+
+  <!-- Green accent line -->
+  <div class="accent-bar"></div>
+
+  <!-- Main card -->
+  <div class="card">
+
+    
+    <p class="preamble">Award-winning linear LED solutions for stunning spaces.</p>
+    
+
+    <h1 class="subject-heading">Elevate Your Architectural Lighting with Starlight Linear LEDs</h1>
+
+    
+    <p class="opening">Dear Mahim Architects Team,</p>
+    
+
+    
+    <p class="intro">Your expertise in architectural design deserves lighting that matches your vision. Starlight Linear LED, recognized as a Top 10 Lighting Brand by Homes India Magazine, delivers precision-engineered solutions tailored for your projects.</p>
+    
+
+    <!-- Feature highlights -->
+    
+    
+    <div class="divider"></div>
+    <p class="section-label">Solution Highlights</p>
+    <div class="features">
+      
+      <div class="feat-card">
+        <div class="feat-icon">
+          💡
+        </div>
+        <p class="feat-text">Architectural Linear Lighting: Versatile for cove, wall wash, facade applications.</p>
+      </div>
+      
+      <div class="feat-card">
+        <div class="feat-icon">
+          📐
+        </div>
+        <p class="feat-text">SLIDER: Compact under-cabinet lighting with customizable sizes.</p>
+      </div>
+      
+      <div class="feat-card">
+        <div class="feat-icon">
+          ✦
+        </div>
+        <p class="feat-text">TOP 3567: Sleek suspended lighting for retail and office spaces.</p>
+      </div>
+      
+    </div>
+    
+
+    <!-- Applications -->
+    
+    <p class="section-label">Applications</p>
+    <ul class="item-list">
+      
+      <li>Cove lighting for luxury residences.</li>
+      
+      <li>Suspended lighting for retail showrooms.</li>
+      
+      <li>Under-cabinet lighting for modern kitchens.</li>
+      
+    </ul>
+    
+
+    <!-- Technical specs -->
+    
+    <p class="section-label">Technical Specifications</p>
+    <ul class="item-list">
+      
+      <li>Architectural Linear Lighting: 2200 K to 8500 K, IP67 outdoor-ready.</li>
+      
+      <li>SLIDER: Dimensions 9.90 x 9.30 mm, IP10 indoor use.</li>
+      
+      <li>TOP 3567: Dimensions 35.30 x 36.7 mm, 14.4-28.8 W/m.</li>
+      
+    </ul>
+    
+
+    <!-- Product References from Catalogue -->
+    
+    
+    
+    
+    <div class="divider"></div>
+    <p class="ref-section-label">From Our Catalogue</p>
+    <div class="ref-grid">
+      
+      <a class="ref-card" href="http://localhost:8000/page_images/starlight_linear_catalogue/page_001.png" target="_blank">
+        <img class="ref-img" src="http://localhost:8000/page_images/starlight_linear_catalogue/page_001.png" alt="Architectural Linear Lighting" loading="lazy">
+        <div class="ref-info">
+          <p class="ref-name">Architectural Linear Lighting</p>
+          <p class="ref-meta">Starlight Linear Catalogue · Pg 1</p>
+          
+        </div>
+      </a>
+      
+      <a class="ref-card" href="http://localhost:8000/page_images/starlight_linear_catalogue/page_006.png" target="_blank">
+        <img class="ref-img" src="http://localhost:8000/page_images/starlight_linear_catalogue/page_006.png" alt="SLIDER" loading="lazy">
+        <div class="ref-info">
+          <p class="ref-name">SLIDER</p>
+          <p class="ref-meta">Starlight Linear Catalogue · Pg 6</p>
+          
+          <p class="ref-specs">4.8 to 11.52 W · 70-85 · IP10</p>
+          
+        </div>
+      </a>
+      
+      <a class="ref-card" href="http://localhost:8000/page_images/starlight_linear_catalogue/page_031.png" target="_blank">
+        <img class="ref-img" src="http://localhost:8000/page_images/starlight_linear_catalogue/page_031.png" alt="SLIM 45" loading="lazy">
+        <div class="ref-info">
+          <p class="ref-name">SLIM 45</p>
+          <p class="ref-meta">Starlight Linear Catalogue · Pg 31</p>
+          
+          <p class="ref-specs">4.8 to 6.72 W/m · 2700K, 3000K, 4000K, 6500K · 70-85 · IP30</p>
+          
+        </div>
+      </a>
+      
+      <a class="ref-card" href="http://localhost:8000/page_images/starlight_linear_catalogue/page_013.png" target="_blank">
+        <img class="ref-img" src="http://localhost:8000/page_images/starlight_linear_catalogue/page_013.png" alt="TOP 1828" loading="lazy">
+        <div class="ref-info">
+          <p class="ref-name">TOP 1828</p>
+          <p class="ref-meta">Starlight Linear Catalogue · Pg 13</p>
+          
+          <p class="ref-specs">70-85 · IP30/IP65</p>
+          
+        </div>
+      </a>
+      
+      <a class="ref-card" href="http://localhost:8000/page_images/starlight_linear_catalogue/page_026.png" target="_blank">
+        <img class="ref-img" src="http://localhost:8000/page_images/starlight_linear_catalogue/page_026.png" alt="TOP 3567" loading="lazy">
+        <div class="ref-info">
+          <p class="ref-name">TOP 3567</p>
+          <p class="ref-meta">Starlight Linear Catalogue · Pg 26</p>
+          
+          <p class="ref-specs">14.4-28.8 W/m · 2700K, 3000K, 4000K, 6500K, 8600K · 70-85</p>
+          
+        </div>
+      </a>
+      
+    </div>
+    
+
+    <!-- CTA -->
+    <div class="cta-block">
+      <p class="cta-text">Explore our award-winning range today at &lt;a href='https://starlightlinearled.com/'&gt;Starlight Linear LED&lt;/a&gt;.</p>
+      <a class="cta-btn"
+         href="mailto:info@starlightlinearled.com?subject=Re: Elevate Your Architectural Lighting with Starlight Linear LEDs&body=Hi Vivek Dhondarkar,"
+         target="_blank">Let's Connect</a>
+    </div>
+
+    <!-- Signature -->
+    <div class="sig">
+      <p class="sig-name">Vivek Dhondarkar</p>
+      <p class="sig-role">Starlight LED Lighting</p>
+      <p class="sig-details">
+        +91-9619436086<br>
+        <a href="mailto:info@starlightlinearled.com">info@starlightlinearled.com</a><br>
+        <a href="https://https://www.starlightlinearled.com" target="_blank">https://www.starlightlinearled.com</a>
+      </p>
+    </div>
+
+  </div><!-- /card -->
+
+  <!-- Footer -->
+  <div class="footer">
+    <p>
+      © Starlight LED Lighting &nbsp;·&nbsp;
+      3 Vedant 3, P&T Colony, Gandhi Nagar, Dombivali East, Thane 421203&nbsp;·&nbsp;
+      <a href="https://https://www.starlightlinearled.com" target="_blank">https://www.starlightlinearled.com</a>
+    </p>
+    <p style="margin-top:6px; color:#334155;">
+      Recognised as one of the <strong style="color:#4CAF50;">Top 10 Brands in Lightings for 2025</strong>
+      – Homes India Magazine
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
