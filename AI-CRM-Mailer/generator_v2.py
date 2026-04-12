@@ -51,7 +51,7 @@ CHROMA_DB_DIR   = os.path.join(os.path.dirname(__file__), "chroma_db")
 COLLECTION_NAME = "starlight_vision"   # shared with catalogue_ingestor
 
 infile      = sys.argv[1] if len(sys.argv) > 1 else "scraped_results.jsonl"
-outdir_default = sys.argv[2] if len(sys.argv) > 2 else "out_emails_gemini_v2"
+outdir_default = sys.argv[2] if len(sys.argv) > 2 else "out_emails_streamlit"
 os.makedirs(outdir_default, exist_ok=True)
 
 
@@ -215,35 +215,27 @@ Company: End-to-end LED lighting solutions, custom manufacturing, supply, instal
 Address: 3 Vedant 3, P&T Colony, Gandhi Nagar, Dombivali East, Thane 421203.
 Phone: 9619436066 | Email: vivek@starlightlinearled.com
 
-ABSOLUTE ANTI-HALLUCINATION RULES:
-1. Reference ONLY product names, model numbers, wattages, CCTs, IP ratings, dimensions,
-   or any other specification that appears VERBATIM in the CATALOGUE CONTEXT below.
-2. If no product is suitable from the context, describe Starlight's GENERAL capabilities
-   (custom linear LED, bespoke manufacturing) — never invent product names or specs.
-3. Use EXACT project names / clients / portfolio items from the client data — never write
-   generic filler like "your recent projects".
-4. Every spec claim must be traceable to the catalogue context.
+ABSOLUTE RULES:
+1. Reference ONLY product names and applications present in the CATALOGUE CONTEXT below.
+2. DO NOT output dense technical specifications (like dimensions or IP ratings) in the email body. Your goal is to write a pleasing, beautiful, relationship-building email.
+3. Use EXACT project names / clients / portfolio items from the scraped client data. Explicitly mention WHERE our products can be used in THEIR specific projects.
+4. If no specific projects are found, focus on their general architectural/interior style.
 
 STYLE:
-- Hyper-personalised: name-drop 1–2 EXACT projects or portfolio items.
-- Concise and skimmable — nobody reads dense paragraphs.
-- Max 2–3 feature bullets; each under 12 words.
-- Use HTML <b>tags</b> for emphasis — NO markdown **bold**.
-- Naturally weave in: on-time delivery, Homes India Magazine Top 10 award.
-- Subject: catchy, industry-relevant, NO client name, NO placeholder {{…}}.
+- Elegantly personalised: Name-drop their projects and suggest Starlight products that fit perfectly.
+- Clean and readable.
+- DO NOT use raw HTML like <a href>. Use plain text.
+- Subject: catchy, industry-relevant, no placeholder {{…}}.
 - Dear line: personalised (e.g. "Dear Mahim Architects Team,").
-- Closing: short CTA only — no sender details (they appear in the signature).
 
 Output ONLY a valid JSON object (no other text, no markdown):
   "subject"            – string
-  "preamble"           – string (one punchy tagline, ≤12 words)
+  "preamble"           – string (one elegant tagline, ≤12 words)
   "opening_line"       – string
-  "intro"              – string (1–2 sentences, HTML-safe)
-  "bullets"            – array of strings (core highlights)
-  "feature_highlights" – array of strings (3 ultra-short features, <10 words each)
-  "use_cases"          – array of strings
-  "technical_specs"    – array of strings (catalogue-sourced only)
-  "cta"                – string
+  "intro"              – string (1–2 sentences focusing on their projects and our synergy)
+  "feature_highlights" – array of strings (3 short elegant benefits of using our lights)
+  "use_cases"          – array of strings (Specific lighting applications in their projects)
+  "cta"                – string (Plain text call to action)
 """
 
 _DRAFT_USER_TMPL = """\
@@ -291,7 +283,7 @@ _JUDGE_SYSTEM = """\
 You are a strict JSON formatter. Take the input text and return a clean, valid
 JSON object with exactly these keys:
   "subject", "preamble", "opening_line", "intro",
-  "bullets", "feature_highlights", "use_cases", "technical_specs", "cta"
+  "feature_highlights", "use_cases", "cta"
 
 Rules:
 1. Array fields must contain ONLY plain strings — never nested objects.
@@ -403,10 +395,10 @@ def generate_eml_from_record(
     preamble         = parsed.get("preamble",  "Precision-engineered LED solutions, delivered on time.")
     opening_line     = parsed.get("opening_line", "Hope this email finds you well.")
     intro            = parsed.get("intro", "").replace("\n", "<br>")
-    bullets          = ensure_list(parsed.get("bullets", []))
     feature_highlights = ensure_list(parsed.get("feature_highlights", []))
     use_cases        = ensure_list(parsed.get("use_cases", []))
-    technical_specs  = ensure_list(parsed.get("technical_specs", []))
+    technical_specs  = []
+    bullets          = []
     cta              = parsed.get(
         "cta",
         "Would you be available for a brief call next week to explore how we can "

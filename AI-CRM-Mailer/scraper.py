@@ -11,14 +11,12 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from dotenv import load_dotenv
 
-from langchain_core.prompts import PromptTemplate
-from langchain_google_genai import GoogleGenerativeAI
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 # ---------------- Config ----------------
 load_dotenv()
-from key_manager import key_manager, with_key_rotation
+from azure_client import azure_manager
 
 INPUT_EXCEL = ""      # Excel with column 'website'
 MANUAL_WEBSITES = ["http://starlightlinearled.com/"]
@@ -43,14 +41,9 @@ adapter = HTTPAdapter(max_retries=retries)
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
-# ---- LangChain LLM (Will be instantiated per call to pick up rotated keys) ----
-summary_prompt = PromptTemplate(
-    input_variables=["text"],
-    template="""
-You are given text extracted from a company or organization's website:
-
-{text}
-
+# ---- Azure OpenAI system prompt for website analysis ----
+_SCRAPE_SYSTEM = """\
+You are given text extracted from a company or organization's website.
 Analyze carefully and extract the following, focusing on marketing and personalization for email outreach:
 
 1. 3-5 sentence summary of what the company does (professional and clear).
@@ -60,11 +53,9 @@ Analyze carefully and extract the following, focusing on marketing and personali
 5. Key phrases / achievements / positioning statements.
 6. Tone & Style (how the company presents itself).
 
-Return in JSON with keys: summary, products_services, target_audience, usp, key_phrases, tone_style.
-Return only valid JSON (no extra explanation).
+Return ONLY a valid JSON object with keys: summary, products_services, target_audience, usp, key_phrases, tone_style.
+No extra explanation, no markdown fences.
 """
-)
-# Chain is now created dynamically below to ensure it uses the latest key
 
 
 # ---------------- Helpers ----------------
@@ -150,27 +141,15 @@ def extract_json_from_llm_output(raw_str):
         except Exception:
             return None
 
-@with_key_rotation
 def invoke_chain_get_text(chunk):
-    # Instantiate LLM and Chain here so it picks up the rotated environment variable
-    llm = GoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.0)
-    chain = summary_prompt | llm
-    
-    try:
-        res = chain.invoke({"text": chunk})
-    except Exception as e:
-        # If it's a rate limit error, the decorator will catch it and retry.
-        # Otherwise, log it as a real failure.
-        if "429" not in str(e) and "exhausted" not in str(e).lower():
-            log.warning(f"LLM call failed with non-rate-limit error: {e}")
-        # Re-raise so decorator can catch rate limits!
-        raise 
-    if isinstance(res, dict):
-        if "text" in res:
-            return res["text"]
-        if "content" in res:
-            return res["content"]
-    return str(res)
+    """Call Azure OpenAI to analyze the scraped website text."""
+    messages = [
+        {"role": "system", "content": _SCRAPE_SYSTEM},
+        {"role": "user", "content": f"Website text:\n\n{chunk}"},
+    ]
+    return azure_manager.chat_completion(
+        messages, temperature=0.0, max_tokens=2048, json_mode=True
+    )
 
 def analyze_text_with_llm(full_text):
     if not full_text.strip():

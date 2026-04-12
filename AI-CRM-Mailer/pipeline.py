@@ -3,12 +3,12 @@ import time
 import pandas as pd
 from pathlib import Path
 
-from scrape_gemini import scrape_and_process
+from scraper import scrape_and_process
 from generator_v2 import generate_eml_from_record
 from send_eml_gsuite import send_email_gsuite
 
 INPUT_EXCEL = "test_input.xlsx"
-OUTPUT_DIR = "out_emails_gemini_v2"
+OUTPUT_DIR = "out_emails_streamlit"
 WAIT_TIMEOUT = 60  # seconds to wait for .eml generation
 SLEEP_BETWEEN_RECORDS = 3
 
@@ -39,7 +39,7 @@ def process_record(website, record_index):
     print(f"➡ Recipient Email: {recipient_email}")
 
     # Step 2: Generate .eml
-    print("🔹 Step 2: Generating .eml via Gemini...")
+    print("🔹 Step 2: Generating .eml via Azure OpenAI...")
     eml_path = generate_eml_from_record(scraped, record_index + 1, OUTPUT_DIR, "email_template.html")
 
     if not eml_path or not Path(eml_path).exists():

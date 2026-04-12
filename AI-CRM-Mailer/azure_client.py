@@ -1,6 +1,6 @@
 """
 Azure OpenAI Client Manager for Starlight AI-CRM Mailer.
-Replaces the Gemini key_manager for all generation and embedding tasks.
+Handles all generation and embedding tasks for the Starlight AI-CRM Mailer.
 
 Required .env variables:
     AZURE_OPENAI_ENDPOINT             - https://your-resource.openai.azure.com/

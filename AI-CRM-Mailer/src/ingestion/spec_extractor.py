@@ -1,18 +1,25 @@
+"""
+Spec Extractor – Azure OpenAI edition.
+
+Uses Azure OpenAI GPT-4o to extract structured product specifications
+from raw catalogue text using Azure OpenAI GPT-4o.
+"""
 import json
 import logging
+import sys
+import os
 from typing import Dict, Any, List
-from google import genai
 from pydantic import BaseModel, Field
 
-# Ensure key manager handles rotation
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
 try:
-    from key_manager import key_manager, with_key_rotation
+    from azure_client import azure_manager
 except ImportError:
-    import sys
-    sys.path.append("..")
-    from key_manager import key_manager, with_key_rotation
+    azure_manager = None  # type: ignore
 
 log = logging.getLogger("spec_extractor")
+
 
 class ProductSpecSchema(BaseModel):
     product_name: str = Field(description="The primary name of the product")
@@ -34,38 +41,40 @@ class ProductSpecSchema(BaseModel):
     application: str = Field(default="", description="Recommended applications, e.g. 'outdoor', 'retail'")
     mounting_type: str = Field(default="", description="How the product is mounted, e.g. 'recessed', 'surface'")
 
-@with_key_rotation
+
+_SPEC_SYSTEM = """\
+You are an expert lighting catalog data extractor.
+Analyze the following raw text extracted from a product catalog page.
+Extract the product specifications and return them in STRICT structured JSON format.
+If a numerical value has multiple options (like 12W, 20W, 30W), return them as a list of numbers: [12, 20, 30].
+If a specification is missing, use the default empty value for its type. Do NOT guess or hallucinate specs.
+
+Return a JSON object with keys: product_name, series, category, subcategory,
+wattage, diameter, height, cutout, beam_angle, ip_rating, driver, led_type,
+color_temperature, lumen_efficiency, body_color, material, application, mounting_type.
+"""
+
+
 def extract_specs_from_text(raw_text: str) -> Dict[str, Any]:
-    """Uses Gemini Structured Outputs to extract specifications into a strict JSON schema."""
-    client = key_manager.get_client()
-    
-    prompt = f"""
-    You are an expert lighting catalog data extractor. 
-    Analyze the following raw text extracted from a product catalog page.
-    Extract the product specifications and return them in STRICT structured JSON format matching the schema rules.
-    If a numerical value has multiple options (like 12W, 20W, 30W), return them as a list of numbers: [12, 20, 30].
-    If a specification is missing, use the default empty value for its type. Do NOT guess or hallucinate specs.
-    
-    RAW TEXT:
-    ---
-    {raw_text}
-    ---
-    """
-    
+    """Uses Azure OpenAI to extract specifications into a structured JSON format."""
+    if azure_manager is None:
+        log.error("azure_manager not available — cannot extract specs.")
+        return {}
+
+    messages = [
+        {"role": "system", "content": _SPEC_SYSTEM},
+        {"role": "user", "content": f"RAW TEXT:\n---\n{raw_text}\n---"},
+    ]
+
     try:
-        response = client.models.generate_content(
-            model=key_manager.get_current_model(),
-            contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": ProductSpecSchema,
-                "temperature": 0.0,
-            },
+        raw = azure_manager.chat_completion(
+            messages, temperature=0.0, max_tokens=2048, json_mode=True
         )
-        return json.loads(response.text)
+        return json.loads(raw)
     except Exception as e:
         log.error(f"Failed to extract specs: {e}")
         raise
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

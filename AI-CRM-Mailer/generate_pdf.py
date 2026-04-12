@@ -34,12 +34,12 @@ pdf.chapter_body(overview_text)
 # --- 2. INGESTION ---
 pdf.chapter_title("2. Ingestion Pipeline (rag_uploader.py)")
 ingestion_text = (
-    "- Multimodal Extraction: We utilize Gemini's Vision capabilities to parse complex PDF catalogs. "
+    "- Multimodal Extraction: We utilize Azure OpenAI GPT-4o Vision capabilities to parse complex PDF catalogs. "
     "Unlike traditional text extractors, our system reasons about tables, bullet points, and images "
     "to maintain structural integrity.\n"
     "- Semantic Chunking: The AI extracts discrete 'intelligent product chunks'. Each chunk contains "
     "the product name, series, technical specs (Voltage, CRI, CCT), and best-use applications.\n"
-    "- Vectorization: Each chunk is converted into a high-dimensional vector using the 'gemini-embedding-001' model.\n"
+    "- Vectorization: Each chunk is converted into a high-dimensional vector using the Azure OpenAI 'text-embedding-ada-002' model.\n"
     "- Vector Storage: These vectors are stored in ChromaDB, an open-source vector database, indexed for fast retrieval."
 )
 pdf.chapter_body(ingestion_text)
@@ -49,7 +49,7 @@ pdf.chapter_title("3. Query & Retrieval (generator_v2.py)")
 retrieval_text = (
     "- Client context: Processing begins with raw scraped data from a client's website (projects, values, industry).\n"
     "- HyDE (Hypothetical Document Embeddings): To improve retrieval accuracy, we use a two-step process. "
-    "First, we ask Gemini to write a 'hypothetical ideal product excerpt' for the client's needs. "
+    "First, we ask GPT-4o to write a 'hypothetical ideal product excerpt' for the client's needs. "
     "Second, we use this hypothetical document as the search query.\n"
     "- Vector Search: HyDE helps align the 'Sales Language' of the client with the 'Technical Language' "
     "of the catalog by searching for semantic similarity in ChromaDB.\n"
@@ -71,8 +71,8 @@ pdf.chapter_body(generation_text)
 # --- 5. TECH STACK ---
 pdf.chapter_title("5. Technology Stack")
 tech_stack = (
-    "- LLM Engine: Google Gemini 2.0 Flash\n"
-    "- Embeddings: Google Gemini-Embedding-001\n"
+    "- LLM Engine: Azure OpenAI GPT-4o\n"
+    "- Embeddings: Azure OpenAI text-embedding-ada-002\n"
     "- Vector Database: ChromaDB (Local Persistent)\n"
     "- Orchestration: Python / Streamlit\n"
 )

@@ -94,45 +94,29 @@
       margin: 0 0 18px;
     }
 
-    /* ── Features list ── */
-    .feat-list { margin: 0 0 30px; padding: 0; list-style: none; }
-    .feat-list li {
-      font-size: 15px;
-      line-height: 1.75;
-      color: #333333;
-      padding: 13px 0;
-      border-bottom: 1px solid #f5f5f5;
-      display: flex;
-      align-items: flex-start;
-      gap: 14px;
+    /* ── Typography & Flow ── */
+    .prose-section {
+      margin: 0 0 36px;
     }
-    .feat-list li:last-child { border-bottom: none; }
-    .feat-num {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      font-size: 11px;
-      font-weight: 700;
-      color: #aaaaaa;
-      letter-spacing: 1px;
-      flex-shrink: 0;
-      padding-top: 3px;
+    .prose-section ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
     }
-
-    /* ── Item list ── */
-    .item-list { padding: 0; margin: 0 0 28px; list-style: none; }
-    .item-list li {
-      font-size: 15px;
+    .prose-section li {
+      font-size: 14px;
       line-height: 1.8;
-      color: #444444;
-      padding: 9px 0 9px 18px;
+      color: #333333;
+      padding: 8px 0 8px 24px;
       position: relative;
-      border-bottom: 1px dashed #f0f0f0;
     }
-    .item-list li:last-child { border-bottom: none; }
-    .item-list li::before {
-      content: '—';
+    .prose-section li::before {
+      content: '✔';
       position: absolute;
       left: 0;
-      color: #cccccc;
+      color: #4CAF50;
+      font-size: 13px;
+      top: 13px;
     }
 
     /* ── CTA ── */
@@ -155,7 +139,7 @@
       text-transform: uppercase;
       padding: 14px 36px;
     }
-    .cta-btn:hover { background: #333333; }
+    .cta-btn:hover { background: #4CAF50; }
 
     /* ── Signature ── */
     .sig {
@@ -177,6 +161,7 @@
       line-height: 1.8;
     }
     .sig-details a { color: #666666; text-decoration: none; border-bottom: 1px solid #dddddd; }
+    .sig-details a:hover { color: #4CAF50; border-bottom: 1px solid #4CAF50; }
 
     /* ── Award line ── */
     .award-line {
@@ -296,41 +281,26 @@
     <p class="intro">{{ intro_paragraph | safe }}</p>
     {% endif %}
 
-    <!-- Features -->
-    {% set feature_items = bullets if bullets and bullets|length > 0
-                          else feature_highlights if feature_highlights and feature_highlights|length > 0
-                          else [] %}
-    {% if feature_items %}
-    <p class="section-header">Solution Overview</p>
-    <ul class="feat-list">
-      {% for item in feature_items %}
-      <li>
-        <span class="feat-num">0{{ loop.index }}</span>
-        <span>{{ item | safe }}</span>
-      </li>
-      {% endfor %}
-    </ul>
-    {% endif %}
+    <!-- Beautiful Flowing Text -->
+    <div class="prose-section">
+      {% set feature_items = feature_highlights if feature_highlights and feature_highlights|length > 0 else [] %}
+      {% if feature_items %}
+      <ul>
+        {% for item in feature_items %}
+        <li>{{ item | safe }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
 
-    <!-- Applications -->
-    {% if use_cases and use_cases|length > 0 %}
-    <p class="section-header">Applications</p>
-    <ul class="item-list">
-      {% for item in use_cases %}
-      <li>{{ item | safe }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-
-    <!-- Specs -->
-    {% if technical_specs and technical_specs|length > 0 %}
-    <p class="section-header">Technical Details</p>
-    <ul class="item-list">
-      {% for item in technical_specs %}
-      <li>{{ item | safe }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
+      {% if use_cases and use_cases|length > 0 %}
+      <br>
+      <ul>
+        {% for item in use_cases %}
+        <li>{{ item | safe }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
 
     <!-- Product References from Catalogue -->
     {% set real_refs = [] %}
