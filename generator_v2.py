@@ -441,7 +441,7 @@ def generate_eml_from_record(
     msg["Subject"] = subject
     msg.attach(MIMEText(html_out, "html"))
 
-    if os.path.exists(logo_path):
+    if company_logo_url == "cid:company_logo" and os.path.exists(logo_path):
         with open(logo_path, "rb") as f:
             img = MIMEImage(f.read())
             img.add_header("Content-ID", "<company_logo>")
