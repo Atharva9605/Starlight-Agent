@@ -1,0 +1,33 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Streamlit specific
+out_emails_streamlit/
+out_emails_archive/
+
+# Database
+chroma_db/
+data/business_config.json
+data/custom_templates/
+
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specifics
+service_account.json
+*.zip
+*.xlsx
+raw_data/

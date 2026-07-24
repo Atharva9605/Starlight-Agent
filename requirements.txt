@@ -1,0 +1,45 @@
+# Starlight AI-CRM Mailer — Requirements
+
+# Core Web App & UI
+streamlit>=1.30.0
+
+# Data Processing
+pandas
+openpyxl
+
+# Vector Database (RAG) — ChromaDB fallback for local dev; Neon pgvector when DATABASE_URL is set
+chromadb>=0.4.0
+psycopg[binary]>=3.1.0
+pgvector>=0.3.0
+
+# PDF & Image Processing
+PyMuPDF     # imported as fitz
+Pillow      # image manipulation
+
+# AI / LLM Integration
+openai>=1.3.0
+jinja2      # email templating
+
+# Web Scraping
+beautifulsoup4
+requests
+urllib3
+
+# Authentication & Environment
+python-dotenv
+bcrypt>=4.0.0
+PyJWT>=2.8.0
+cryptography>=41.0.0
+
+# GSuite / Gmail API Integration
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+
+# Storage Backends (Standard & Optional)
+azure-storage-blob
+cloudinary
+fastapi
+uvicorn
+python-multipart
