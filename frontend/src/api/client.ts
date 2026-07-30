@@ -96,7 +96,18 @@ export const api = {
   rejectDraft: (cid: string, mid: string) =>
     request(`/api/conversations/${cid}/drafts/${mid}/reject`, { method: 'POST' }),
   gmailSync: () => request('/api/gmail/sync', { method: 'POST' }),
-  kbStatus: () => request<{ chunk_count: number; catalogues: string[]; backend?: string }>('/api/kb-status'),
+  kbStatus: () =>
+    request<{
+      chunk_count?: number
+      chunks?: number
+      catalogues: string[]
+      backend?: string
+      store?: any
+    }>('/api/kb-status').then((r) => ({
+      ...r,
+      chunk_count: r.chunk_count ?? r.chunks ?? 0,
+      catalogues: r.catalogues || [],
+    })),
   clearKb: () => request('/api/clear-kb', { method: 'POST' }),
   prompts: () => request<{ prompts: any[] }>('/api/config/prompts'),
   updatePrompt: (key: string, content: string) =>

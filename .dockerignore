@@ -10,3 +10,10 @@ out_emails_archive/
 *.eml
 generated_emls.zip
 service_account.json
+frontend/node_modules/
+frontend/dist/
+**/__pycache__/
+*.md
+.streamlit/
+evals/
+deploy/*.md

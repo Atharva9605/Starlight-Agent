@@ -44,12 +44,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setMe(normalized)
     if (brandRes) {
-      setBranding(brandRes)
-      document.documentElement.style.setProperty('--accent', brandRes.accent_color || '#0F766E')
-      document.documentElement.style.setProperty(
-        '--accent-soft',
-        `${brandRes.accent_color || '#0F766E'}33`,
-      )
+      setBranding({
+        display_name: 'Starlight',
+        logo_url: brandRes.logo_url || '',
+        accent_color: '#2563EB',
+      })
+      // Starlight product theme — fixed brand colors
+      document.documentElement.style.setProperty('--accent', '#2563EB')
+      document.documentElement.style.setProperty('--accent-soft', 'rgba(37, 99, 235, 0.1)')
     }
   }
 

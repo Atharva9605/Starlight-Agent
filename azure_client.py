@@ -332,5 +332,19 @@ class AzureOpenAIManager:
 # ---------------------------------------------------------------------------
 # Module-level singleton — import and use directly:
 #   from azure_client import azure_manager
+# Lazy so the API process can boot for health checks before secrets are present.
 # ---------------------------------------------------------------------------
-azure_manager = AzureOpenAIManager()
+class _LazyAzureOpenAIManager:
+    def __init__(self) -> None:
+        self._inner: Optional[AzureOpenAIManager] = None
+
+    def _get(self) -> AzureOpenAIManager:
+        if self._inner is None:
+            self._inner = AzureOpenAIManager()
+        return self._inner
+
+    def __getattr__(self, name: str):
+        return getattr(self._get(), name)
+
+
+azure_manager = _LazyAzureOpenAIManager()

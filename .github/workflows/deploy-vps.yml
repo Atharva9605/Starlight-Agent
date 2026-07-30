@@ -1,0 +1,336 @@
+# =============================================================================
+# Starlight AI Mailer CI/CD — SSH-based deploy + Technoventor branded email
+# =============================================================================
+# On push to main:
+#   build-and-push  → build & push api + web images to Docker Hub
+#                       ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-api
+#                       ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-web
+#   deploy-to-vps   → SSH to VPS, docker compose pull + up -d, health-gate, prune
+#   notify-success/ → Technoventor-branded Gmail (MAIL_* secrets)
+#   notify-failure
+#
+# No HTTP deploy hook. Direct SSH into the VPS (VPS_SSH_KEY + VPS_IP secrets).
+# Secrets (.env) stay on the VPS — this pipeline never ships Azure/GSuite keys.
+#
+# Required GitHub secrets:
+#   DOCKERHUB_USERNAME  DOCKERHUB_TOKEN
+#   VPS_SSH_KEY (private key, root@VPS)  VPS_IP
+#   MAIL_USERNAME  MAIL_PASSWORD (Gmail app password)  MAIL_TO
+#
+# One-time VPS prep (see deploy/README.md): register mailer-*.caddy with the
+# shared edge; place /opt/technoventor/starlight-mailer/.env
+# =============================================================================
+
+name: Deploy Starlight Mailer to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  API_IMAGE: technoventor-starlight-mailer-api
+  WEB_IMAGE: technoventor-starlight-mailer-web
+  APP_DOMAIN: mailer.starlightlinearled.com
+  API_DOMAIN: api.mailer.starlightlinearled.com
+  VPS_DEPLOY_PATH: /opt/technoventor/starlight-mailer
+
+jobs:
+  build-and-push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.API_IMAGE }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.API_IMAGE }}:${{ github.sha }}
+
+      - name: Build & push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          build-args: |
+            VITE_API_URL=https://api.mailer.starlightlinearled.com
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.WEB_IMAGE }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.WEB_IMAGE }}:${{ github.sha }}
+
+  deploy-to-vps:
+    name: Pull & Restart on VPS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+
+      - name: Sync compose file to VPS
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no root@${{ secrets.VPS_IP }} \
+            "mkdir -p ${{ env.VPS_DEPLOY_PATH }}/deploy && test -f ${{ env.VPS_DEPLOY_PATH }}/.env"
+          scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
+            deploy/docker-compose.cicd.yml \
+            root@${{ secrets.VPS_IP }}:${{ env.VPS_DEPLOY_PATH }}/deploy/docker-compose.cicd.yml
+
+      - name: Execute deployment
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no root@${{ secrets.VPS_IP }} bash -s <<REMOTE_EOF
+            set -e
+            cd ${{ env.VPS_DEPLOY_PATH }}
+
+            DOCKER_CONFIG_DIR="/tmp/docker-\$\$"
+            mkdir -p "\$DOCKER_CONFIG_DIR"
+            export DOCKER_CONFIG="\$DOCKER_CONFIG_DIR"
+            export DOCKERHUB_USERNAME="$DOCKERHUB_USERNAME"
+
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin 2>&1 | grep -v "WARNING" || true
+
+            COMPOSE="docker compose --env-file .env -f deploy/docker-compose.cicd.yml"
+
+            if ! \$COMPOSE pull; then
+              echo "FAILED: docker compose pull"
+              rm -rf "\$DOCKER_CONFIG_DIR"
+              exit 1
+            fi
+
+            \$COMPOSE up -d
+
+            # Health gate: wait up to 180s for api + web healthy (db may already be up).
+            deadline=\$(( \$(date +%s) + 180 ))
+            while true; do
+              ps="\$(\$COMPOSE ps)"
+              if echo "\$ps" | grep -Eq "Exit|unhealthy"; then
+                echo "FAILED: container exited or unhealthy"
+                echo "\$ps"
+                rm -rf "\$DOCKER_CONFIG_DIR"
+                exit 1
+              fi
+              healthy_count=\$(echo "\$ps" | grep -c "(healthy)" || true)
+              if [ "\$healthy_count" -ge 2 ]; then
+                echo "OK: api + web healthy (\$healthy_count healthy)"
+                echo "\$ps"
+                break
+              fi
+              if [ "\$(date +%s)" -ge "\$deadline" ]; then
+                echo "FAILED: timed out waiting for containers to become healthy"
+                echo "\$ps"
+                rm -rf "\$DOCKER_CONFIG_DIR"
+                exit 1
+              fi
+              sleep 5
+            done
+
+            docker image prune -a -f
+            rm -rf "\$DOCKER_CONFIG_DIR"
+          REMOTE_EOF
+
+      - name: Capture final status and logs
+        if: always()
+        run: |
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no root@${{ secrets.VPS_IP }} \
+            "cd ${{ env.VPS_DEPLOY_PATH }} && \
+             COMPOSE='docker compose --env-file .env -f deploy/docker-compose.cicd.yml' && \
+             echo '=== CONTAINER STATUS ===' && \$COMPOSE ps && \
+             echo '' && echo '=== API LOGS ===' && \$COMPOSE logs --no-color --tail=80 api && \
+             echo '' && echo '=== WEB LOGS ===' && \$COMPOSE logs --no-color --tail=40 web" || true
+          rm -f ~/.ssh/vps_key
+
+  notify-success:
+    name: Send Success Email
+    needs: deploy-to-vps
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate mail secrets
+        id: mail
+        continue-on-error: true
+        env:
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          missing=0
+          [ -z "$MAIL_USERNAME" ] && { echo "::warning::Missing MAIL_USERNAME — skipping email"; missing=1; }
+          [ -z "$MAIL_PASSWORD" ] && { echo "::warning::Missing MAIL_PASSWORD — skipping email"; missing=1; }
+          [ -z "$MAIL_TO" ] && { echo "::warning::Missing MAIL_TO — skipping email"; missing=1; }
+          exit $missing
+      - uses: dawidd6/action-send-mail@v16
+        if: steps.mail.outcome == 'success'
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Starlight Mailer deployed — ${{ github.event.head_commit.message || format('run {0}', github.run_id) }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: Starlight Mailer CI/CD <${{ secrets.MAIL_USERNAME }}>
+          convert_markdown: false
+          attachments: deploy/cicd/assets/logo.jpg,deploy/cicd/assets/banner.jpg
+          html_body: |
+            <!DOCTYPE html>
+            <html lang="en">
+            <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Deployment Succeeded</title></head>
+            <body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:40px 16px;">
+                <tr><td align="center">
+                  <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);border:1px solid #e5e7eb;">
+                    <tr>
+                      <td style="background:#ffffff;padding:24px 32px;border-bottom:1px solid #f3f4f6;">
+                        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+                          <td width="52" valign="middle"><img src="cid:logo.jpg" alt="Technoventor" height="40" style="display:block;border:0;height:40px;" /></td>
+                          <td valign="middle" style="padding-left:14px;">
+                            <p style="margin:0;font-size:15px;font-weight:700;color:#0d9488;line-height:1.3;">Technoventor Innovations Pvt Ltd.</p>
+                            <p style="margin:4px 0 0;font-size:11px;color:#64748b;">Starlight AI Mailer</p>
+                          </td>
+                        </tr></table>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:0;line-height:0;">
+                        <img src="cid:banner.jpg" alt="Design · Develop · Deploy" width="620" style="display:block;width:100%;max-width:620px;height:auto;border:0;" />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:32px 32px 24px;">
+                        <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">Starlight Mailer is live!</p>
+                        <p style="margin:0;font-size:14px;color:#4b5563;line-height:1.5;">API + frontend images were built, pushed, and rolled out on the Technoventor VPS.</p>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:0 32px 24px;">
+                        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;border:1px solid #f1f5f9;">
+                          <tr>
+                            <td style="padding:16px;border-bottom:1px solid #f1f5f9;">
+                              <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;">Commit</p>
+                              <p style="margin:0;font-size:14px;color:#1e293b;font-weight:500;">${{ github.event.head_commit.message || github.event_name }}</p>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding:16px;border-bottom:1px solid #f1f5f9;">
+                              <table width="100%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                  <td width="50%">
+                                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;">Branch</p>
+                                    <p style="margin:0;font-size:13px;color:#1e293b;font-weight:500;">${{ github.ref_name }}</p>
+                                  </td>
+                                  <td width="50%">
+                                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;">Author</p>
+                                    <p style="margin:0;font-size:13px;color:#1e293b;font-weight:500;">@${{ github.actor }}</p>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="padding:16px;">
+                              <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;">Live endpoints</p>
+                              <p style="margin:0 0 4px;font-size:13px;color:#1e293b;font-weight:500;"><a href="https://${{ env.APP_DOMAIN }}" style="color:#2563eb;text-decoration:none;">https://${{ env.APP_DOMAIN }}</a></p>
+                              <p style="margin:0;font-size:13px;color:#1e293b;font-weight:500;"><a href="https://${{ env.API_DOMAIN }}/" style="color:#2563eb;text-decoration:none;">https://${{ env.API_DOMAIN }}/</a></p>
+                            </td>
+                          </tr>
+                        </table>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #f3f4f6;">
+                        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+                          <td style="font-size:12px;color:#9ca3af;">Starlight Mailer CI/CD &bull; ${{ github.repository }}</td>
+                          <td align="right"><a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" style="color:#2563eb;font-size:12px;text-decoration:none;font-weight:600;">View GitHub Run</a></td>
+                        </tr></table>
+                      </td>
+                    </tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body>
+            </html>
+
+  notify-failure:
+    name: Send Failure Email
+    needs: [build-and-push, deploy-to-vps]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate mail secrets
+        id: mail
+        continue-on-error: true
+        env:
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          missing=0
+          [ -z "$MAIL_USERNAME" ] && { echo "::warning::Missing MAIL_USERNAME — skipping email"; missing=1; }
+          [ -z "$MAIL_PASSWORD" ] && { echo "::warning::Missing MAIL_PASSWORD — skipping email"; missing=1; }
+          [ -z "$MAIL_TO" ] && { echo "::warning::Missing MAIL_TO — skipping email"; missing=1; }
+          exit $missing
+      - uses: dawidd6/action-send-mail@v16
+        if: steps.mail.outcome == 'success'
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Starlight Mailer deploy FAILED — ${{ github.event.head_commit.message || format('run {0}', github.run_id) }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: Starlight Mailer CI/CD <${{ secrets.MAIL_USERNAME }}>
+          convert_markdown: false
+          attachments: deploy/cicd/assets/logo.jpg,deploy/cicd/assets/banner.jpg
+          html_body: |
+            <!DOCTYPE html>
+            <html lang="en">
+            <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Deployment Failed</title></head>
+            <body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:40px 16px;">
+                <tr><td align="center">
+                  <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+                    <tr>
+                      <td style="padding:32px 32px 24px;">
+                        <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">Starlight Mailer deploy failed</p>
+                        <p style="margin:0;font-size:14px;color:#4b5563;line-height:1.5;">Open the GitHub Actions run for logs. Existing containers on the VPS were not intentionally removed by a failed health gate mid-pull — check the run output.</p>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style="padding:0 32px 32px;">
+                        <p style="margin:0;font-size:13px;"><a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" style="color:#2563eb;text-decoration:none;font-weight:600;">View GitHub run</a></p>
+                      </td>
+                    </tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body>
+            </html>

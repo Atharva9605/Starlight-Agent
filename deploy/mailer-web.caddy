@@ -1,0 +1,9 @@
+# Starlight AI Mailer — frontend route.
+# Install:
+#   cp /opt/technoventor/starlight-mailer/deploy/mailer-web.caddy /opt/technoventor/edge/sites/mailer-web.caddy
+#   docker exec mis-vps-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+# (Soft-reload only — never restart the edge container for product deploys.)
+
+mailer.starlightlinearled.com {
+	reverse_proxy starlight-mailer-web:80
+}

@@ -51,6 +51,9 @@ def _pg_conn():
     from pgvector.psycopg import register_vector
 
     conn = psycopg.connect(os.environ["DATABASE_URL"])
+    # Extension must exist before register_vector() looks up the type OID.
+    conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    conn.commit()
     register_vector(conn)
     return conn
 

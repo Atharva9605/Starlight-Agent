@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { EmailPreviewFrame } from '../components/EmailPreviewFrame'
 
 export function TemplatesPage() {
   const [names, setNames] = useState<string[]>([
@@ -10,6 +11,7 @@ export function TemplatesPage() {
   const [selected, setSelected] = useState(names[0])
   const [content, setContent] = useState('')
   const [msg, setMsg] = useState('')
+  const [showHtml, setShowHtml] = useState(false)
 
   useEffect(() => {
     api.templates().then((res: any) => {
@@ -32,22 +34,52 @@ export function TemplatesPage() {
     setMsg('Template saved')
   }
 
+  const label = selected.replace('email_template_', '').replace('.html', '').replace(/_/g, ' ')
+
   return (
-    <div className="stack" style={{ gap: '1.25rem' }}>
-      <div>
-        <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 500 }}>Templates</h1>
-        <p className="muted">Edit HTML email templates and preview branding.</p>
-      </div>
-      <div className="panel stack">
-        <select className="select" value={selected} onChange={(e) => setSelected(e.target.value)}>
-          {names.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
-        <textarea className="textarea" rows={18} value={content} onChange={(e) => setContent(e.target.value)} />
-        <div className="row">
-          <button className="btn" onClick={save}>Save</button>
-          {msg ? <span className="muted">{msg}</span> : null}
+    <div>
+      <div className="page-hero">
+        <div>
+          <h1>Email Design</h1>
+          <p>Preview-first Starlight templates. HTML is advanced-only.</p>
         </div>
-        <iframe title="tpl" sandbox="" srcDoc={content} style={{ width: '100%', minHeight: 280, borderRadius: 12, border: '1px solid var(--border)', background: 'white' }} />
+        <button className="btn" onClick={save}>Save template</button>
+      </div>
+
+      <div className="panel stack" style={{ marginBottom: '1rem' }}>
+        <select className="select" value={selected} onChange={(e) => setSelected(e.target.value)}>
+          {names.map((n) => (
+            <option key={n} value={n}>
+              {n.includes('minimalist') ? 'Minimalist' : n.includes('bold') ? 'Bold & Vibrant' : 'Modern Soft'} ({n})
+            </option>
+          ))}
+        </select>
+        {msg ? <span className="pill ok">{msg}</span> : null}
+      </div>
+
+      <div className="grid-2">
+        <div className="panel tint-blue stack">
+          <strong style={{ fontFamily: 'var(--display)' }}>Customer preview — {label}</strong>
+          <EmailPreviewFrame html={content} subject="Sample Starlight email" />
+        </div>
+        <div className="panel stack">
+          <button type="button" className="btn secondary" onClick={() => setShowHtml((v) => !v)}>
+            {showHtml ? 'Hide HTML source' : 'Advanced: Edit HTML'}
+          </button>
+          {showHtml ? (
+            <div className="advanced-box stack">
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                For designers / ops only. Sales users never see this on Inbox.
+              </p>
+              <textarea className="textarea" rows={18} value={content} onChange={(e) => setContent(e.target.value)} />
+            </div>
+          ) : (
+            <div className="muted">
+              Preview updates as you edit HTML in Advanced. Keep Jinja variables like{' '}
+              <code>{'{{ subject }}'}</code> intact.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

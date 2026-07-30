@@ -11,6 +11,7 @@ from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import pandas as pd
 import zipfile
@@ -73,6 +74,10 @@ app.add_middleware(
 )
 app.middleware("http")(saas_auth_middleware)
 
+_static_dir = Path(__file__).resolve().parent / "static"
+_static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/media", StaticFiles(directory=str(_static_dir)), name="media")
+
 
 @app.on_event("startup")
 async def startup():
@@ -86,7 +91,9 @@ async def root():
     return {
         "message": "Starlight AI-CRM Mailer API is Live!",
         "docs": "/docs",
-        "status": "healthy"
+        "status": "healthy",
+        "version": "1.0.0",
+        "release_date": "2026-07-25",
     }
 
 class SignupRequest(BaseModel):

@@ -1,0 +1,120 @@
+# Production compose for CI/CD — PULLS pre-built images from Docker Hub.
+#
+# GitHub Actions (.github/workflows/deploy-vps.yml) builds and pushes:
+#   ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-api:latest
+#   ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-web:latest
+# then SSHes to the VPS and runs `docker compose pull && up -d` with this file.
+#
+# Unlike deploy/docker-compose.prod.yml (build-on-VPS), this file never builds —
+# it only pulls. Secrets stay in /opt/technoventor/starlight-mailer/.env on the VPS.
+#
+#   Frontend  → https://mailer.starlightlinearled.com       (Caddy → starlight-mailer-web:80)
+#   API       → https://api.mailer.starlightlinearled.com   (Caddy → starlight-mailer-api:7860)
+#   DB        → pgvector (local volume; no host ports)
+#
+# Usage on the VPS (run by CI/CD; DOCKERHUB_USERNAME exported in the shell):
+#   docker compose --env-file ../.env -f docker-compose.cicd.yml pull
+#   docker compose --env-file ../.env -f docker-compose.cicd.yml up -d
+#
+# Caddy owns 80/443 — this stack only joins deploy_default.
+
+name: technoventor-starlight-mailer
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: starlight-mailer-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: starlight
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: starlight
+    volumes:
+      - mailer_pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - deploy_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U starlight -d starlight"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  api:
+    image: ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-api:${APP_IMAGE_TAG:-latest}
+    container_name: starlight-mailer-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      SAAS_MODE: ${SAAS_MODE:-true}
+      FRONTEND_URL: ${FRONTEND_URL:-https://mailer.starlightlinearled.com}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://mailer.starlightlinearled.com}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://starlight:${POSTGRES_PASSWORD}@starlight-mailer-db:5432/starlight}
+      STATIC_SERVER_URL: ${STATIC_SERVER_URL:-https://api.mailer.starlightlinearled.com/media}
+    volumes:
+      - mailer_data:/app/data
+      - mailer_attachments:/app/static/attachments
+      - mailer_page_images:/app/static/page_images
+      - mailer_chroma:/app/chroma_db
+    expose:
+      - "7860"
+    networks:
+      - deploy_default
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-fsS",
+          "http://127.0.0.1:7860/",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  web:
+    image: ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-web:${APP_IMAGE_TAG:-latest}
+    container_name: starlight-mailer-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    expose:
+      - "80"
+    networks:
+      - deploy_default
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "http://127.0.0.1/",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  mailer_pgdata:
+    name: technoventor-starlight-mailer_pgdata
+  mailer_data:
+    name: technoventor-starlight-mailer_data
+  mailer_attachments:
+    name: technoventor-starlight-mailer_attachments
+  mailer_page_images:
+    name: technoventor-starlight-mailer_page_images
+  mailer_chroma:
+    name: technoventor-starlight-mailer_chroma
+
+networks:
+  deploy_default:
+    external: true

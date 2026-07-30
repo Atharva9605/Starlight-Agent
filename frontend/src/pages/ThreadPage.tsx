@@ -1,14 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useEffect, useMemo, useState } from 'react'
+import { EmailComposer } from '../components/EmailComposer'
+import { EmailPreviewFrame } from '../components/EmailPreviewFrame'
+import { MessageBubble } from '../components/MessageBubble'
 
 export function ThreadPage() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
   const [instructions, setInstructions] = useState('')
-  const [edit, setEdit] = useState({ subject: '', body_html: '', body_text: '' })
+  const [subject, setSubject] = useState('')
+  const [bodyHtml, setBodyHtml] = useState('')
+  const [bodyText, setBodyText] = useState('')
   const [notice, setNotice] = useState('')
+  const [composerKey, setComposerKey] = useState(0)
 
   const q = useQuery({
     queryKey: ['conversation', id],
@@ -21,39 +27,59 @@ export function ThreadPage() {
     return [...messages].reverse().find((m: any) => m.status === 'draft')
   }, [q.data])
 
+  const timeline = useMemo(() => {
+    const messages = q.data?.messages || []
+    return messages.filter((m: any) => m.status !== 'draft')
+  }, [q.data])
+
   useEffect(() => {
     if (!draft) {
-      setEdit({ subject: '', body_html: '', body_text: '' })
+      setSubject('')
+      setBodyHtml('')
+      setBodyText('')
       return
     }
-    setEdit({
-      subject: draft.subject || '',
-      body_html: draft.body_html || '',
-      body_text: draft.body_text || '',
-    })
+    setSubject(draft.subject || '')
+    setBodyHtml(draft.body_html || '')
+    setBodyText(draft.body_text || '')
+    setComposerKey((k) => k + 1)
   }, [draft?.id])
 
   const generate = useMutation({
     mutationFn: () => api.generateDraft(id, instructions),
     onSuccess: async () => {
-      setNotice('Draft generated')
+      setNotice('Draft ready — review the preview, then approve')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
     onError: (e: any) => setNotice(e.message),
   })
 
   const save = useMutation({
-    mutationFn: () => api.updateDraft(id, draft.id, edit),
+    mutationFn: () =>
+      api.updateDraft(id, draft.id, {
+        subject,
+        body_html: bodyHtml,
+        body_text: bodyText,
+      }),
     onSuccess: async () => {
-      setNotice('Draft saved')
+      setNotice('Saved')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
   })
 
   const approve = useMutation({
-    mutationFn: () => api.approveDraft(id, draft.id),
+    mutationFn: async () => {
+      if (draft) {
+        await api.updateDraft(id, draft.id, {
+          subject,
+          body_html: bodyHtml,
+          body_text: bodyText,
+        })
+      }
+      return api.approveDraft(id, draft.id)
+    },
     onSuccess: async () => {
-      setNotice('Draft approved & sent')
+      setNotice('Approved & sent')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
     onError: (e: any) => setNotice(e.message),
@@ -62,69 +88,83 @@ export function ThreadPage() {
   const reject = useMutation({
     mutationFn: () => api.rejectDraft(id, draft.id),
     onSuccess: async () => {
-      setNotice('Draft rejected')
-      setEdit({ subject: '', body_html: '', body_text: '' })
+      setNotice('Draft discarded')
+      setSubject('')
+      setBodyHtml('')
+      setBodyText('')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
   })
 
-  const messages = q.data?.messages || []
-
   return (
-    <div className="stack" style={{ gap: '1.25rem' }}>
-      <div>
-        <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 500 }}>
-          {q.data?.subject || 'Thread'}
-        </h1>
-        <p className="muted">{q.data?.client?.email}</p>
+    <div>
+      <div className="page-hero">
+        <div>
+          <Link to="/inbox" className="muted" style={{ fontWeight: 600, fontSize: 13 }}>← Inbox</Link>
+          <h1 style={{ marginTop: 6 }}>{q.data?.subject || 'Conversation'}</h1>
+          <p>{q.data?.client?.company || q.data?.client?.email || 'Client thread'}</p>
+        </div>
+        <span className="pill pink">Human approve required</span>
       </div>
 
-      <div className="grid-2">
+      <div className="grid-2 thread-layout">
         <div className="panel stack">
-          <strong>Timeline</strong>
-          {messages.map((m: any) => (
-            <div key={m.id} style={{ borderLeft: '2px solid var(--border)', paddingLeft: 12 }}>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {m.direction} · {m.status} {m.ai_generated ? '· AI' : ''}
-              </div>
-              <div style={{ fontWeight: 600 }}>{m.subject}</div>
-              <div style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>
-                {m.body_text || '(html body)'}
-              </div>
-            </div>
+          <strong style={{ fontFamily: 'var(--display)' }}>Conversation</strong>
+          {timeline.length === 0 ? (
+            <div className="muted">No messages yet in this thread.</div>
+          ) : null}
+          {timeline.map((m: any) => (
+            <MessageBubble key={m.id} message={m} />
           ))}
         </div>
 
-        <div className="panel stack">
-          <strong>AI draft (human approve)</strong>
-          <textarea
-            className="textarea"
-            rows={2}
-            placeholder="Optional refinement instructions"
+        <div className={`panel tint-amber stack ${generate.isPending ? 'is-generating' : ''}`}>
+          <strong style={{ fontFamily: 'var(--display)' }}>AI draft for customer</strong>
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            Edit like email — you never need to touch HTML. Preview is exactly what the client gets.
+          </p>
+
+          <input
+            className="input"
+            placeholder="Refine with AI (tone, products, CTA…)"
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
           />
-          <button className="btn" onClick={() => generate.mutate()} disabled={generate.isPending}>
-            {generate.isPending ? 'Generating…' : 'Generate draft'}
+          <button className="btn amber" onClick={() => generate.mutate()} disabled={generate.isPending}>
+            {generate.isPending ? 'Writing draft…' : draft ? 'Regenerate draft' : 'Generate draft'}
           </button>
 
           {draft ? (
             <>
-              <input className="input" value={edit.subject} onChange={(e) => setEdit({ ...edit, subject: e.target.value })} placeholder="Subject" />
-              <textarea className="textarea" rows={10} value={edit.body_html || edit.body_text} onChange={(e) => setEdit({ ...edit, body_html: e.target.value, body_text: e.target.value })} />
+              {draft.internal_note ? (
+                <div className="pill warn">Sales note: {draft.internal_note}</div>
+              ) : null}
+              <label className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</label>
+              <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
+
+              <label className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Body</label>
+              <EmailComposer
+                key={composerKey}
+                html={bodyHtml}
+                onChange={(h, t) => {
+                  setBodyHtml(h)
+                  setBodyText(t)
+                }}
+              />
+
+              <label className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Customer preview</label>
+              <EmailPreviewFrame html={bodyHtml} text={bodyText} subject={subject} />
+
               <div className="row">
                 <button className="btn secondary" onClick={() => save.mutate()} disabled={save.isPending}>Save</button>
                 <button className="btn" onClick={() => approve.mutate()} disabled={approve.isPending}>Approve & send</button>
                 <button className="btn danger" onClick={() => reject.mutate()} disabled={reject.isPending}>Reject</button>
               </div>
-              {edit.body_html ? (
-                <iframe title="preview" sandbox="" srcDoc={edit.body_html} style={{ width: '100%', minHeight: 220, border: '1px solid var(--border)', borderRadius: 12, background: 'white' }} />
-              ) : null}
             </>
           ) : (
-            <div className="muted">No draft yet. Generate one after an inbound message.</div>
+            <div className="muted">No draft yet — generate after a client reply.</div>
           )}
-          {notice ? <div className="muted">{notice}</div> : null}
+          {notice ? <div className="pill ok">{notice}</div> : null}
         </div>
       </div>
     </div>

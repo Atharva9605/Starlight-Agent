@@ -24,23 +24,27 @@ export function PromptsPage() {
   }
 
   return (
-    <div className="stack" style={{ gap: '1.25rem' }}>
-      <div>
-        <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontWeight: 500 }}>Prompt Studio</h1>
-        <p className="muted">Edit AI behavior without deploying code.</p>
+    <div>
+      <div className="page-hero">
+        <div>
+          <h1>Prompt Studio</h1>
+          <p>Admin: tune Starlight’s voice, HyDE, and conversation agent.</p>
+        </div>
+        {msg ? <span className="pill ok">{msg}</span> : null}
       </div>
-      <div className="row">
+
+      <div className="row" style={{ marginBottom: '1rem' }}>
         {(categories.length ? categories : ['email', 'scraping', 'rag', 'knowledge_base', 'conversation']).map((c) => (
           <button key={c} className={`btn ${category === c ? '' : 'secondary'}`} onClick={() => setCategory(c)}>
             {c}
           </button>
         ))}
       </div>
-      {msg ? <div className="muted">{msg}</div> : null}
+
       {prompts.map((p: any) => (
-        <div key={p.key} className="panel stack">
+        <div key={p.key} className="panel stack" style={{ marginBottom: '0.9rem' }}>
           <div>
-            <strong>{p.label}</strong>
+            <strong style={{ fontFamily: 'var(--display)' }}>{p.label}</strong>
             <div className="muted" style={{ fontSize: 13 }}>{p.description}</div>
           </div>
           <textarea
@@ -49,7 +53,7 @@ export function PromptsPage() {
             value={drafts[p.key] ?? p.content}
             onChange={(e) => setDrafts({ ...drafts, [p.key]: e.target.value })}
           />
-          <button className="btn secondary" onClick={() => save(p.key)}>Save</button>
+          <button className="btn secondary" onClick={() => save(p.key)}>Save prompt</button>
         </div>
       ))}
     </div>
