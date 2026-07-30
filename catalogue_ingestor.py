@@ -184,17 +184,24 @@ def _extract_products_from_page(
 
     try:
         products = json.loads(cleaned)
-        if isinstance(products, list):
-            return products
-        if isinstance(products, dict):
-            # model occasionally returns {"products": [...]}
-            for key in ("products", "items", "data"):
-                if key in products and isinstance(products[key], list):
-                    return products[key]
     except json.JSONDecodeError:
         log.warning("JSON parse failed for %s — skipping page.", page_label)
+        return []
 
-    return []
+    if isinstance(products, dict):
+        # model occasionally returns {"products": [...]}
+        for key in ("products", "items", "data"):
+            if isinstance(products.get(key), list):
+                products = products[key]
+                break
+        else:
+            return []
+
+    if not isinstance(products, list):
+        return []
+
+    # Nulls and bare strings show up in the array often enough to matter.
+    return [p for p in products if isinstance(p, dict)]
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +222,21 @@ def _build_chunk_and_metadata(
       • document string   – rich text ready for embedding
       • metadata dict     – stored alongside in ChromaDB
     """
-    name = product.get("product_name", "Unknown Product")
-    category = product.get("category", "other")
-    description = product.get("description", "")
-    features = product.get("features", [])
-    specs = product.get("specs", {})
-    variants = product.get("variants", [])
+    # `or` rather than a .get() default: the model routinely emits explicit
+    # nulls ("specs": null), and a default only applies when the key is absent.
+    name = product.get("product_name") or "Unknown Product"
+    category = product.get("category") or "other"
+    description = product.get("description") or ""
+    features = product.get("features") or []
+    specs = product.get("specs") or {}
+    variants = product.get("variants") or []
+
+    if not isinstance(specs, dict):
+        specs = {}
+    if isinstance(features, (str, bytes)):
+        features = [features]
+    if isinstance(variants, (str, bytes)):
+        variants = [variants]
 
     # ── Build embedding document ──────────────────────────────────────────
     lines = [
@@ -331,6 +347,7 @@ def ingest_catalogue(
     blob_url_map: dict[int, str] = {}
 
     pages_skipped = 0
+    pages_failed = 0
 
     for page_idx in range(total_pages):
         page_num = page_idx + 1
@@ -343,46 +360,53 @@ def ingest_catalogue(
                 f"Page {page_label} — rendering & extracting…",
             )
 
-        page = doc[page_idx]
+        # One unreadable page must not cost the whole catalogue: log it, count
+        # it, keep going. Anything genuinely fatal surfaces as zero chunks.
+        try:
+            page = doc[page_idx]
 
-        # 1. Render page
-        native_png = _render_page(page)
+            # 1. Render page
+            native_png = _render_page(page)
 
-        # 2. Resize for blob (display quality)
-        blob_png = _resize_png(native_png, BLOB_IMAGE_MAX_W)
+            # 2. Resize for blob (display quality)
+            blob_png = _resize_png(native_png, BLOB_IMAGE_MAX_W)
 
-        # 3. Upload blob → get URL
-        blob_url = blob_manager.upload_page_image(blob_png, slug, page_num)
-        blob_url_map[page_num] = blob_url
+            # 3. Upload blob → get URL
+            blob_url = blob_manager.upload_page_image(blob_png, slug, page_num)
+            blob_url_map[page_num] = blob_url
 
-        # 4. Resize for API (smaller payload)
-        api_png = _resize_png(native_png, API_IMAGE_MAX_W)
+            # 4. Resize for API (smaller payload)
+            api_png = _resize_png(native_png, API_IMAGE_MAX_W)
 
-        # 5. Extract products with GPT-4o Vision
-        products = _extract_products_from_page(api_png, page_label)
+            # 5. Extract products with GPT-4o Vision
+            products = _extract_products_from_page(api_png, page_label)
 
-        if not products:
-            log.debug("Page %s: no products extracted (decorative/cover).", page_label)
+            if not products:
+                log.debug("Page %s: no products extracted (decorative/cover).", page_label)
+                pages_skipped += 1
+                continue
+
+            log.info("Page %s: %d product(s) extracted.", page_label, len(products))
+
+            # 6. Build chunks + metadata
+            for prod_idx, product in enumerate(products):
+                document, metadata = _build_chunk_and_metadata(
+                    product=product,
+                    catalogue_name=display_name,
+                    catalogue_slug=slug,
+                    catalogue_type=catalogue_type,
+                    page_number=page_num,
+                    blob_url=blob_url,
+                    source_filename=filename,
+                )
+                chunk_id = f"{filename}::page::{page_num:03d}::product::{prod_idx:02d}"
+                all_docs.append(document)
+                all_metas.append(metadata)
+                all_ids.append(chunk_id)
+        except Exception:
+            log.exception("Page %s failed — skipping it.", page_label)
+            pages_failed += 1
             pages_skipped += 1
-            continue
-
-        log.info("Page %s: %d product(s) extracted.", page_label, len(products))
-
-        # 6. Build chunks + metadata
-        for prod_idx, product in enumerate(products):
-            document, metadata = _build_chunk_and_metadata(
-                product=product,
-                catalogue_name=display_name,
-                catalogue_slug=slug,
-                catalogue_type=catalogue_type,
-                page_number=page_num,
-                blob_url=blob_url,
-                source_filename=filename,
-            )
-            chunk_id = f"{filename}::page::{page_num:03d}::product::{prod_idx:02d}"
-            all_docs.append(document)
-            all_metas.append(metadata)
-            all_ids.append(chunk_id)
 
     doc.close()
 
@@ -392,6 +416,7 @@ def ingest_catalogue(
         return {
             "pages_processed": 0,
             "pages_skipped": pages_skipped,
+            "pages_failed": pages_failed,
             "total_chunks": 0,
             "blob_urls": blob_url_map,
             "catalogue_name": display_name,
@@ -426,6 +451,7 @@ def ingest_catalogue(
     return {
         "pages_processed": pages_processed,
         "pages_skipped":   pages_skipped,
+        "pages_failed":    pages_failed,
         "total_chunks":    len(all_docs),
         "blob_urls":       blob_url_map,
         "catalogue_name":  display_name,
