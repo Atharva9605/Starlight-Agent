@@ -106,9 +106,16 @@ export const api = {
   updateSender: (body: Record<string, string>) =>
     request('/api/config/sender', { method: 'PUT', body: JSON.stringify(body) }),
   gmailStatus: () =>
-    request<{ connected: boolean; connected_email?: string }>('/api/integrations/gmail/status'),
+    request<{
+      connected: boolean
+      email?: string
+      mode?: 'platform' | 'oauth'
+      message?: string
+    }>('/api/integrations/gmail/status'),
   gmailAuthorize: () =>
-    request<{ authorize_url: string }>('/api/integrations/gmail/authorize'),
+    request<{ configured: boolean; url: string | null; message?: string }>(
+      '/api/integrations/gmail/authorize',
+    ),
   gmailDisconnect: () => request('/api/integrations/gmail', { method: 'DELETE' }),
   conversations: (mailboxOnly = true) =>
     request<{ conversations: any[] }>(
