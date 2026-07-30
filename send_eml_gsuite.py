@@ -374,7 +374,13 @@ def poll_history_changes(start_history_id: Optional[str]) -> tuple[list[dict], O
         current_history_id = profile.get("historyId")
 
         if not start_history_id:
-            return [], str(current_history_id)
+            # First sync for this org. Recording the bookmark alone would make
+            # every reply already sitting in the inbox permanently invisible,
+            # since history.list only reports changes after startHistoryId.
+            # Backfill the recent inbox instead; process_inbound_message still
+            # drops anything that isn't a reply to a known thread.
+            log.info("No Gmail history bookmark yet — backfilling recent inbox")
+            return list_recent_inbox_messages(), str(current_history_id)
 
         new_messages: list[dict] = []
         page_token = None
