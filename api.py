@@ -45,6 +45,15 @@ from conversation_agent import (
     generate_banner,
     record_outbound_from_pipeline,
 )
+from campaign_drafts import (
+    body_text_from_eml,
+    company_from_website,
+    get_draft,
+    pop_draft,
+    revise_draft_content,
+    rewrite_eml,
+    store_draft,
+)
 from gmail_sync import run_gmail_sync, gmail_sync_loop
 from config_manager import (
     get_config,
@@ -821,16 +830,191 @@ async def upload_leads(file: UploadFile = File(...)):
 
 class ProcessRequest(BaseModel):
     leads: List[dict]
-    sender_email: str
+    sender_email: str = ""
     recipient_override: Optional[str] = ""
     template: str = "email_template.html"
     delay: int = 3
+    autosend: bool = True
+
+
+class CampaignGenerateRequest(BaseModel):
+    lead: dict
+    template: str = "email_template.html"
+    recipient_override: Optional[str] = ""
+    sender_email: Optional[str] = ""
+    row_index: int = 0
+
+
+class CampaignReviseRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/campaign/generate")
+async def campaign_generate(req: CampaignGenerateRequest):
+    """Scrape + generate one outbound draft. Does not send."""
+    website = (req.lead or {}).get("website", "").strip()
+    if not website:
+        raise HTTPException(status_code=400, detail="Lead must include a website")
+
+    org_id = get_organization_id()
+    outdir = os.path.join("out_emails_api", org_id, "drafts")
+    os.makedirs(outdir, exist_ok=True)
+
+    scraped_data = await run_in_thread(scrape_and_process, website)
+    if not scraped_data:
+        raise HTTPException(status_code=400, detail="Scraper failed for this website.")
+
+    if req.recipient_override:
+        scraped_data["emails"] = req.recipient_override
+    if req.lead.get("company"):
+        scraped_data.setdefault("company", req.lead["company"])
+    scraped_data["website"] = website
+
+    result = await run_in_thread(
+        generate_eml_from_record, scraped_data, req.row_index + 1, outdir, req.template
+    )
+    if not result:
+        raise HTTPException(status_code=500, detail="Email generation failed.")
+    eml_path, trace_info = result
+    html = (trace_info or {}).get("html") or ""
+    if not html:
+        html_path = Path(eml_path).with_suffix(".html")
+        if html_path.exists():
+            html = html_path.read_text(encoding="utf-8")
+
+    to_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
+    company = company_from_website(
+        website, req.lead.get("company") or scraped_data.get("company") or ""
+    )
+    draft = {
+        "organization_id": org_id,
+        "outdir": outdir,
+        "eml_path": eml_path,
+        "html_path": str(Path(eml_path).with_suffix(".html")),
+        "subject": (trace_info or {}).get("subject") or "",
+        "html": html,
+        "from": (trace_info or {}).get("from") or "",
+        "to": to_email,
+        "website": website,
+        "company": company,
+        "template": req.template,
+        "sender_email": req.sender_email or "",
+        "scraped_data": scraped_data,
+        "row_index": req.row_index,
+        "chat": [],
+    }
+    draft_id = store_draft(draft)
+    return {
+        "draft_id": draft_id,
+        "subject": draft["subject"],
+        "html": draft["html"],
+        "to": draft["to"],
+        "from": draft["from"],
+        "website": website,
+        "company": company,
+        "row_index": req.row_index,
+    }
+
+
+@app.post("/api/campaign/drafts/{draft_id}/revise")
+async def campaign_revise(draft_id: str, body: CampaignReviseRequest):
+    draft = get_draft(draft_id)
+    if not draft or draft.get("organization_id") != get_organization_id():
+        raise HTTPException(status_code=404, detail="Draft not found")
+    try:
+        revised = await run_in_thread(
+            revise_draft_content,
+            draft["subject"],
+            draft["html"],
+            body.message,
+            draft.get("company") or "",
+            draft.get("website") or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    draft["subject"] = revised["subject"]
+    draft["html"] = revised["html"]
+    draft.setdefault("chat", []).append({"role": "user", "content": body.message})
+    draft["chat"].append({"role": "assistant", "content": "Updated the email."})
+    await run_in_thread(rewrite_eml, draft)
+    return {
+        "draft_id": draft_id,
+        "subject": draft["subject"],
+        "html": draft["html"],
+        "to": draft["to"],
+        "chat": draft["chat"],
+    }
+
+
+@app.post("/api/campaign/drafts/{draft_id}/send")
+async def campaign_send(draft_id: str):
+    draft = get_draft(draft_id)
+    if not draft or draft.get("organization_id") != get_organization_id():
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    await run_in_thread(rewrite_eml, draft)
+    send_result = await run_in_thread(
+        send_email_gsuite,
+        draft["eml_path"],
+        draft.get("sender_email") or "",
+        get_organization_id(),
+    )
+    if not send_result.get("success"):
+        raise HTTPException(
+            status_code=500,
+            detail=send_result.get("error") or "GSuite sending failed",
+        )
+
+    recipient_email = (draft.get("to") or "").strip()
+    if use_postgres() and recipient_email:
+        try:
+            await asyncio.to_thread(
+                record_outbound_from_pipeline,
+                client_email=recipient_email,
+                client_company=draft.get("company") or "",
+                client_website=draft.get("website") or "",
+                subject=draft.get("subject") or "",
+                body_html=draft.get("html") or "",
+                body_text=body_text_from_eml(draft["eml_path"])
+                or _strip_html(draft.get("html") or ""),
+                profile_json=draft.get("scraped_data") or {},
+                template_name=draft.get("template") or "email_template.html",
+                gmail_message_id=send_result.get("message_id") or "",
+                gmail_thread_id=send_result.get("thread_id") or "",
+            )
+        except Exception as conv_err:
+            # Send succeeded — don't fail the request on CRM write.
+            log = __import__("logging").getLogger("api")
+            log.warning("conversation not saved after send: %s", conv_err)
+
+    pop_draft(draft_id)
+    return {
+        "status": "sent",
+        "message_id": send_result.get("message_id"),
+        "thread_id": send_result.get("thread_id"),
+        "to": recipient_email,
+    }
+
+
+@app.delete("/api/campaign/drafts/{draft_id}")
+async def campaign_discard(draft_id: str):
+    draft = get_draft(draft_id)
+    if not draft or draft.get("organization_id") != get_organization_id():
+        raise HTTPException(status_code=404, detail="Draft not found")
+    pop_draft(draft_id)
+    return {"status": "discarded"}
+
 
 @app.post("/api/process-stream")
 async def process_leads(req: ProcessRequest):
     """
     Initiates processing of leads.
     Returns a Server-Sent Events (SSE) stream.
+    When autosend=false, drafts are generated and emitted but not sent
+    (prefer /api/campaign/generate for interactive review).
     """
     async def event_stream():
         org_id = get_organization_id()
@@ -874,6 +1058,31 @@ async def process_leads(req: ProcessRequest):
                 
                 # Send RAG Trace Info
                 yield f"data: {json.dumps({'type': 'rag_trace', 'row_index': idx, 'data': {'company': scraped_data.get('company', website), 'website': website, 'trace_info': trace_info}})}\n\n"
+
+                if not req.autosend:
+                    to_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
+                    draft_id = store_draft({
+                        "organization_id": org_id,
+                        "outdir": outdir,
+                        "eml_path": eml_path,
+                        "html_path": str(html_path),
+                        "subject": (trace_info or {}).get("subject") or "",
+                        "html": html_content,
+                        "from": (trace_info or {}).get("from") or "",
+                        "to": to_email,
+                        "website": website,
+                        "company": company_from_website(
+                            website, row.get("company") or scraped_data.get("company") or ""
+                        ),
+                        "template": req.template,
+                        "sender_email": req.sender_email or "",
+                        "scraped_data": scraped_data,
+                        "row_index": idx,
+                        "chat": [],
+                    })
+                    yield f"data: {json.dumps({'type': 'draft_ready', 'row_index': idx, 'draft_id': draft_id, 'subject': (trace_info or {}).get('subject', ''), 'html': html_content, 'to': to_email})}\n\n"
+                    yield f"data: {json.dumps({'type': 'status_update', 'row_index': idx, 'status': '📝 Ready for review'})}\n\n"
+                    continue
                 
                 yield f"data: {json.dumps({'type': 'log', 'message': f'Sending email via GSuite for {website}'})}\n\n"
                 send_result = await run_in_thread(

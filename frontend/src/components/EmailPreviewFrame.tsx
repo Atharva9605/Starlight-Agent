@@ -4,6 +4,7 @@ type Props = {
   subject?: string
   fromLabel?: string
   compact?: boolean
+  fullscreen?: boolean
 }
 
 /** Sandboxed rendered email — what the customer sees. Never shows source. */
@@ -13,14 +14,17 @@ export function EmailPreviewFrame({
   subject,
   fromLabel = 'Starlight Linear LED',
   compact = false,
+  fullscreen = false,
 }: Props) {
   const doc =
     html && html.trim()
       ? html
       : `<html><body style="font-family:Segoe UI,Arial,sans-serif;padding:16px;color:#0f172a;white-space:pre-wrap">${escapeHtml(text || '')}</body></html>`
 
+  const height = fullscreen ? '100%' : compact ? 160 : 280
+
   return (
-    <div className="email-chrome">
+    <div className={`email-chrome${fullscreen ? ' fullscreen' : ''}`}>
       <div className="email-chrome-bar">
         <div className="email-chrome-dots">
           <span /><span /><span />
@@ -36,7 +40,9 @@ export function EmailPreviewFrame({
         srcDoc={doc}
         style={{
           width: '100%',
-          minHeight: compact ? 160 : 280,
+          height,
+          minHeight: fullscreen ? 0 : height,
+          flex: fullscreen ? 1 : undefined,
           border: 0,
           background: 'white',
           display: 'block',

@@ -160,6 +160,41 @@ export const api = {
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
+  campaignGenerate: (body: {
+    lead: Record<string, any>
+    template: string
+    recipient_override?: string
+    sender_email?: string
+    row_index?: number
+  }) =>
+    request<{
+      draft_id: string
+      subject: string
+      html: string
+      to: string
+      from: string
+      website: string
+      company: string
+      row_index: number
+    }>('/api/campaign/generate', { method: 'POST', body: JSON.stringify(body) }),
+  campaignRevise: (draftId: string, message: string) =>
+    request<{
+      draft_id: string
+      subject: string
+      html: string
+      to: string
+      chat: { role: string; content: string }[]
+    }>(`/api/campaign/drafts/${draftId}/revise`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  campaignSend: (draftId: string) =>
+    request<{ status: string; to?: string; message_id?: string }>(
+      `/api/campaign/drafts/${draftId}/send`,
+      { method: 'POST' },
+    ),
+  campaignDiscard: (draftId: string) =>
+    request(`/api/campaign/drafts/${draftId}`, { method: 'DELETE' }),
   aiEvents: () => request<{ events: any[] }>('/api/ai/events'),
   orgMembers: () =>
     request<{ members: OrgMember[]; count: number }>('/api/org/members'),

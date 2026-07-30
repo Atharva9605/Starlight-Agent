@@ -2,14 +2,17 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { Link } from 'react-router-dom'
+import { Dropzone } from '../components/Dropzone'
 
 /** Sales-facing catalogues page — no JSON / RAG dump. */
 export function CataloguesPage() {
   const kb = useQuery({ queryKey: ['kb'], queryFn: api.kbStatus })
   const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const upload = async (files?: FileList | null) => {
     if (!files?.length) return
+    setBusy(true)
     setMsg('Ingesting…')
     try {
       await api.uploadCatalogues(files)
@@ -17,6 +20,8 @@ export function CataloguesPage() {
       await kb.refetch()
     } catch (e: any) {
       setMsg(e.message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -29,7 +34,15 @@ export function CataloguesPage() {
           <h1>Catalogues</h1>
           <p>Upload Starlight product PDFs that ground every outbound email.</p>
         </div>
-        <button className="btn danger" onClick={async () => { await api.clearKb(); kb.refetch() }}>
+        <button
+          className="btn danger"
+          type="button"
+          onClick={async () => {
+            await api.clearKb()
+            kb.refetch()
+            setMsg('Cleared')
+          }}
+        >
           Clear all
         </button>
       </div>
@@ -42,7 +55,14 @@ export function CataloguesPage() {
 
       <div className="panel tint-cyan stack" style={{ marginBottom: '1rem' }}>
         <strong style={{ fontFamily: 'var(--display)' }}>Upload catalogues</strong>
-        <input type="file" multiple accept=".pdf,.txt,.docx" onChange={(e) => upload(e.target.files)} />
+        <Dropzone
+          accept=".pdf,.txt,.docx"
+          multiple
+          busy={busy}
+          title="Drop PDF catalogues here"
+          hint="or click to choose files · PDF, TXT, DOCX"
+          onFiles={upload}
+        />
         {!catalogues.length ? (
           <div className="muted">No catalogues yet — upload a PDF to get started.</div>
         ) : (
