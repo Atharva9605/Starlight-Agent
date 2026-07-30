@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api } from '../api/client'
+import { api, type CatalogueFileResult } from '../api/client'
 import { Link } from 'react-router-dom'
 import { Dropzone } from '../components/Dropzone'
 
@@ -8,18 +8,27 @@ import { Dropzone } from '../components/Dropzone'
 export function CataloguesPage() {
   const kb = useQuery({ queryKey: ['kb'], queryFn: api.kbStatus })
   const [msg, setMsg] = useState('')
+  const [error, setError] = useState('')
+  const [fileResults, setFileResults] = useState<CatalogueFileResult[]>([])
   const [busy, setBusy] = useState(false)
 
   const upload = async (files?: FileList | null) => {
     if (!files?.length) return
     setBusy(true)
-    setMsg('Ingesting…')
+    setError('')
+    setFileResults([])
+    setMsg('Reading catalogue… scanned PDFs take a few minutes.')
     try {
-      await api.uploadCatalogues(files)
-      setMsg('Catalogue ready')
+      const res = await api.uploadCatalogues(files)
+      setFileResults(res.results || [])
+      const added = (res.results || []).filter((r) => r.success).length
+      setMsg(`Indexed ${added} of ${files.length}`)
       await kb.refetch()
     } catch (e: any) {
-      setMsg(e.message)
+      setError(e.message || 'Upload failed')
+      setFileResults(e.results || [])
+      setMsg('')
+      await kb.refetch()
     } finally {
       setBusy(false)
     }
@@ -37,10 +46,13 @@ export function CataloguesPage() {
         <button
           className="btn danger"
           type="button"
+          disabled={busy}
           onClick={async () => {
             await api.clearKb()
-            kb.refetch()
+            setFileResults([])
+            setError('')
             setMsg('Cleared')
+            kb.refetch()
           }}
         >
           Clear all
@@ -50,7 +62,7 @@ export function CataloguesPage() {
       <div className="stat-row">
         <div className="stat blue"><div className="label">Chunks</div><div className="value">{kb.data?.chunk_count ?? '—'}</div></div>
         <div className="stat cyan"><div className="label">Catalogues</div><div className="value">{catalogues.length}</div></div>
-        <div className="stat amber"><div className="label">Status</div><div className="value" style={{ fontSize: '1rem', marginTop: 8 }}>{msg || 'Ready'}</div></div>
+        <div className="stat amber"><div className="label">Status</div><div className="value" style={{ fontSize: '1rem', marginTop: 8 }}>{busy ? 'Working…' : msg || 'Ready'}</div></div>
       </div>
 
       <div className="panel tint-cyan stack" style={{ marginBottom: '1rem' }}>
@@ -63,7 +75,31 @@ export function CataloguesPage() {
           hint="or click to choose files · PDF, TXT, DOCX"
           onFiles={upload}
         />
-        {!catalogues.length ? (
+
+        {error ? (
+          <div className="alert danger">
+            <strong>Could not index that catalogue.</strong>
+            <div style={{ marginTop: 4 }}>{error}</div>
+          </div>
+        ) : null}
+
+        {fileResults.length ? (
+          <div className="stack" style={{ gap: 6 }}>
+            {fileResults.map((r) => (
+              <div key={r.filename} className="list-row">
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontWeight: 700 }}>{r.filename}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{r.message}</div>
+                </div>
+                <span className={`pill ${r.success ? 'ok' : 'pink'}`}>
+                  {r.success ? 'Indexed' : 'Failed'}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {!catalogues.length && !fileResults.length ? (
           <div className="muted">No catalogues yet — upload a PDF to get started.</div>
         ) : (
           <div className="stack">

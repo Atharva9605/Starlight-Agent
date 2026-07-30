@@ -755,21 +755,39 @@ async def upload_catalogues(files: List[UploadFile] = File(...)):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
-        
+
         try:
             class MockFile:
                 name = file.filename
                 def read(self):
                     with open(tmp_path, "rb") as f:
                         return f.read()
-            
-            mock_f = MockFile()
-            # process_pdf_to_chroma runs synchronously, might block event loop slightly, but acceptable for this usecase.
-            success, msg = process_pdf_to_chroma(mock_f, progress_callback=lambda f, m: None)
+
+            # Scanned catalogues run GPT-4o Vision per page — keep it off the
+            # event loop. run_in_thread carries the tenant context that
+            # add_chunks() needs to scope rows to this organization.
+            success, msg = await run_in_thread(
+                process_pdf_to_chroma, MockFile(), progress_callback=None
+            )
             results.append({"filename": file.filename, "success": success, "message": msg})
+        except Exception as e:
+            results.append({"filename": file.filename, "success": False, "message": str(e)})
         finally:
             os.remove(tmp_path)
-    return {"results": results}
+
+    chunks, catalogues = get_status()
+    ingested = [r for r in results if r["success"]]
+    if not ingested:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "results": results,
+                "chunks": chunks,
+                "catalogues": catalogues,
+                "detail": "; ".join(r["message"] for r in results) or "Ingestion failed",
+            },
+        )
+    return {"results": results, "chunks": chunks, "catalogues": catalogues}
     
 @app.post("/api/clear-kb")
 async def clear_kb():

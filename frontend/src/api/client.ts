@@ -6,6 +6,18 @@ export type OrgMembership = {
   name?: string
 }
 
+export type CatalogueFileResult = {
+  filename: string
+  success: boolean
+  message: string
+}
+
+export type CatalogueUploadResult = {
+  results: CatalogueFileResult[]
+  chunks?: number
+  catalogues?: string[]
+}
+
 export type OrgMember = {
   id: string
   email: string
@@ -149,7 +161,7 @@ export const api = {
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
-  uploadCatalogues: async (files: FileList) => {
+  uploadCatalogues: async (files: FileList): Promise<CatalogueUploadResult> => {
     const fd = new FormData()
     Array.from(files).forEach((f) => fd.append('files', f))
     const res = await fetch(`${API_URL}/api/upload-catalogues`, {
@@ -157,8 +169,22 @@ export const api = {
       headers: authHeaders(),
       body: fd,
     })
-    if (!res.ok) throw new Error(await res.text())
-    return res.json()
+    let body: any = null
+    try {
+      body = await res.json()
+    } catch {
+      /* non-JSON error page */
+    }
+    if (!res.ok) {
+      const detail =
+        body?.detail ||
+        body?.results?.map((r: any) => r.message).join('; ') ||
+        `Upload failed (${res.status})`
+      const err = new Error(detail) as Error & { results?: CatalogueFileResult[] }
+      err.results = body?.results
+      throw err
+    }
+    return body as CatalogueUploadResult
   },
   campaignGenerate: (body: {
     lead: Record<string, any>
