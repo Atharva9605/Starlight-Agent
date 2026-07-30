@@ -955,6 +955,7 @@ async def campaign_revise(draft_id: str, body: CampaignReviseRequest):
 
     draft["subject"] = revised["subject"]
     draft["html"] = revised["html"]
+    draft["dirty"] = True
     draft.setdefault("chat", []).append({"role": "user", "content": body.message})
     draft["chat"].append({"role": "assistant", "content": "Updated the email."})
     await run_in_thread(rewrite_eml, draft)
@@ -973,7 +974,10 @@ async def campaign_send(draft_id: str):
     if not draft or draft.get("organization_id") != get_organization_id():
         raise HTTPException(status_code=404, detail="Draft not found")
 
-    await run_in_thread(rewrite_eml, draft)
+    # An unedited draft already has a correctly built .eml from the generator.
+    if draft.get("dirty"):
+        await run_in_thread(rewrite_eml, draft)
+
     send_result = await run_in_thread(
         send_email_gsuite,
         draft["eml_path"],

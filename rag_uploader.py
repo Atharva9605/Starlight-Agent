@@ -25,7 +25,7 @@ import logging
 import fitz  # PyMuPDF
 
 from azure_client import azure_manager
-from config_manager import get_prompt
+from config_manager import format_prompt, get_prompt
 from vector_store import add_chunks, delete_by_source
 
 log = logging.getLogger("rag_uploader")
@@ -98,7 +98,7 @@ def _extract_text_chunks(batch: str) -> list[str]:
     raw = azure_manager.chat_completion(
         [
             {"role": "system", "content": get_prompt("rag_text_system")},
-            {"role": "user", "content": get_prompt("rag_text_user").format(text=batch)},
+            {"role": "user", "content": format_prompt(get_prompt("rag_text_user"), text=batch)},
         ],
         temperature=0.0,
         max_tokens=4096,

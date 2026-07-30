@@ -33,6 +33,12 @@ saved_model/**/* filter=lfs diff=lfs merge=lfs -text
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.zst filter=lfs diff=lfs merge=lfs -text
 *tfevents* filter=lfs diff=lfs merge=lfs -text
-*.png filter=lfs diff=lfs merge=lfs -text
-*.jpg filter=lfs diff=lfs merge=lfs -text
-*.pdf filter=lfs diff=lfs merge=lfs -text
+
+# Images and PDFs are deliberately NOT LFS-tracked. They previously were, but
+# the binaries never reached LFS storage, so every checkout got 130-byte
+# pointer files instead of images — including the email logo, which broke
+# outbound mail. Commit these as ordinary binary blobs.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary

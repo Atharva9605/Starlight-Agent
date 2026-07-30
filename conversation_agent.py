@@ -11,7 +11,7 @@ import re
 from typing import Any, Optional
 
 from azure_client import azure_manager
-from config_manager import get_prompt, get_sender
+from config_manager import format_prompt, get_prompt, get_sender
 from generator_v2 import query_rag_with_trace
 from schemas import ConversationDraft, parse_with_retry
 from ai_events import timed_ai_event
@@ -386,7 +386,8 @@ def generate_draft_for_conversation(
         "Never claim the email was sent — a human must approve."
     )
 
-    user_prompt = get_prompt("conversation_user").format(
+    user_prompt = format_prompt(
+        get_prompt("conversation_user"),
         message_history=message_history,
         client_json=json.dumps(profile, ensure_ascii=False),
         rag_context=rag_context,
@@ -501,7 +502,8 @@ def generate_banner(
             {"role": "system", "content": get_prompt("banner_system")},
             {
                 "role": "user",
-                "content": get_prompt("banner_user").format(
+                "content": format_prompt(
+                    get_prompt("banner_user"),
                     instructions=f"Create a banner for subject: {target.get('subject', '')}",
                     client_json=json.dumps(profile, ensure_ascii=False),
                     rag_context=sender.get("sender_company", ""),

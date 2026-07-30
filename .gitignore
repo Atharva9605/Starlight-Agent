@@ -31,3 +31,8 @@ service_account.json
 *.zip
 *.xlsx
 raw_data/
+
+# Catalogue page renders are regenerated on every ingestion — runtime output,
+# not source. In production these live on a Docker volume.
+static/page_images/
+out_emails_api/

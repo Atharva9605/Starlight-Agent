@@ -27,14 +27,11 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from jinja2 import Environment, BaseLoader
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.image import MIMEImage
-
 load_dotenv()
 
 from azure_client import azure_manager
-from config_manager import get_prompt, get_sender
+from config_manager import format_prompt, get_prompt, get_sender
+from email_html import build_eml_message, inline_css
 from vector_store import query as vector_query
 
 # ---------------------------------------------------------------------------
@@ -119,7 +116,7 @@ def query_rag_with_trace(
         max_distance = float(os.getenv("RAG_MAX_DISTANCE", "0.55"))
 
     with timed_ai_event("rag_hyde_query", prompt_key="hyde_system") as bag:
-        hyde_user = get_prompt("hyde_user").format(client_desc=client_desc)
+        hyde_user = format_prompt(get_prompt("hyde_user"), client_desc=client_desc)
         hyde_messages = [
             {"role": "system", "content": get_prompt("hyde_system")},
             {"role": "user", "content": hyde_user},
@@ -340,7 +337,8 @@ def generate_creative_draft(rec: dict) -> tuple[str, list[str], list[dict], dict
         {"role": "system", "content": get_prompt("draft_system")},
         {
             "role": "user",
-            "content": get_prompt("draft_user").format(
+            "content": format_prompt(
+                get_prompt("draft_user"),
                 rag_context=rag_context,
                 client_json=client_json,
             ),
@@ -520,6 +518,10 @@ def generate_eml_from_record(
         referenced_products=product_refs,   # ← NEW: product reference cards
     )
 
+    # Inline the template's <style> rules before anything is stored, so the
+    # preview shows exactly the markup that gets delivered.
+    html_out = inline_css(html_out)
+
     safe_name = sanitize_filename(
         rec.get("emails") or rec.get("company") or f"record_{idx}"
     )
@@ -527,19 +529,14 @@ def generate_eml_from_record(
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html_out)
 
-    # Build .eml
-    msg = MIMEMultipart("alternative")
-    msg["From"]    = f'"{sender["sender_name"]}" <{sender["sender_email"]}>'
-    msg["To"]      = str(rec.get("emails", ""))
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html_out, "html"))
-
-    if sender.get("company_logo_url", "cid:company_logo") == "cid:company_logo" and os.path.exists(logo_path):
-        with open(logo_path, "rb") as f:
-            img = MIMEImage(f.read())
-            img.add_header("Content-ID", "<company_logo>")
-            img.add_header("Content-Disposition", "inline", filename="logo.jpg")
-            msg.attach(img)
+    msg = build_eml_message(
+        subject=subject,
+        html=html_out,
+        from_addr=f'"{sender["sender_name"]}" <{sender["sender_email"]}>',
+        to_addr=str(rec.get("emails", "")),
+        logo_path=logo_path,
+        embed_logo=sender.get("company_logo_url", "cid:company_logo") == "cid:company_logo",
+    )
 
     eml_path = os.path.join(outdir, f"{idx}_{safe_name}.eml")
     with open(eml_path, "w", encoding="utf-8") as f:

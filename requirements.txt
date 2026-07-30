@@ -19,6 +19,7 @@ Pillow      # image manipulation
 # AI / LLM Integration
 openai>=1.3.0
 jinja2      # email templating
+premailer   # inline <style> CSS so mail clients render the template
 
 # Web Scraping
 beautifulsoup4

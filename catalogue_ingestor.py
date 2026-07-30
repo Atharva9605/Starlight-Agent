@@ -41,7 +41,7 @@ from PIL import Image
 
 from azure_client import azure_manager
 from azure_blob import blob_manager
-from config_manager import get_prompt
+from config_manager import format_prompt, get_prompt
 from vector_store import add_chunks, delete_by_source
 
 log = logging.getLogger("catalogue_ingestor")
@@ -164,7 +164,7 @@ def _extract_products_from_page(
     """
     raw = azure_manager.vision_completion(
         image_bytes=api_image_bytes,
-        text_prompt=get_prompt("vision_user").format(page_label=page_label),
+        text_prompt=format_prompt(get_prompt("vision_user"), page_label=page_label),
         system_prompt=get_prompt("vision_system"),
         temperature=0.0,
         max_tokens=3000,

@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -195,6 +196,24 @@ def get_prompt(key: str, organization_id: str | None = None) -> str:
             return content
     defaults = _load_defaults()
     return defaults.get("prompts", {}).get(key, {}).get("content", "")
+
+
+def format_prompt(template: str, **values: Any) -> str:
+    """
+    Substitute {placeholders} without str.format().
+
+    Prompts are user-editable and routinely contain literal JSON braces such as
+    {"products": [...]}, which str.format() reads as a field name and rejects
+    with KeyError. Only the named placeholders are replaced; every other brace
+    is left untouched. Single pass, so a substituted value that happens to
+    contain a placeholder is not re-expanded.
+    """
+    if not values:
+        return template
+    pattern = re.compile(
+        "|".join(re.escape("{" + k + "}") for k in sorted(values, key=len, reverse=True))
+    )
+    return pattern.sub(lambda m: str(values[m.group(0)[1:-1]]), template)
 
 
 def get_sender(organization_id: str | None = None) -> dict:

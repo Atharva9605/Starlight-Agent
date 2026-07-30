@@ -4,11 +4,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import threading
 import uuid
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from email import message_from_string
 from pathlib import Path
 from typing import Any, Optional
@@ -20,14 +17,6 @@ log = logging.getLogger("campaign_drafts")
 
 _lock = threading.Lock()
 _DRAFTS: dict[str, dict[str, Any]] = {}
-
-
-def _strip_html(html: str) -> str:
-    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html or "", flags=re.I | re.S)
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
-    text = re.sub(r"</p>", "\n", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
 
 
 def store_draft(draft: dict[str, Any]) -> str:
@@ -49,32 +38,43 @@ def pop_draft(draft_id: str) -> Optional[dict[str, Any]]:
 
 
 def rewrite_eml(draft: dict[str, Any]) -> str:
-    """Rebuild .eml from current subject/html/to so Gmail send stays in sync."""
+    """
+    Rebuild the .eml after a chat edit.
+
+    Only called when the draft is dirty — an untouched draft keeps the .eml the
+    generator produced. Uses the same builder as generation so the inline logo
+    part and multipart/related structure survive the rewrite.
+    """
+    from config_manager import get_sender
+    from email_html import build_eml_message, inline_css
+
     eml_path = draft.get("eml_path") or ""
-    sender_from = draft.get("from") or ""
-    to_email = draft.get("to") or ""
-    subject = draft.get("subject") or ""
-    html = draft.get("html") or ""
-
-    msg = MIMEMultipart("alternative")
-    if sender_from:
-        msg["From"] = sender_from
-    if to_email:
-        msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(html, "html", "utf-8"))
-    msg.attach(MIMEText(_strip_html(html), "plain", "utf-8"))
-
     if not eml_path:
         outdir = draft.get("outdir") or "out_emails_api"
         os.makedirs(outdir, exist_ok=True)
         eml_path = os.path.join(outdir, f"{draft['id']}.eml")
         draft["eml_path"] = eml_path
 
+    html = inline_css(draft.get("html") or "")
+    draft["html"] = html
+
+    sender = get_sender()
+    logo_path = os.path.join(os.path.dirname(__file__), "starlight.jpg")
+
+    msg = build_eml_message(
+        subject=draft.get("subject") or "",
+        html=html,
+        from_addr=draft.get("from") or "",
+        to_addr=draft.get("to") or "",
+        logo_path=logo_path,
+        embed_logo=sender.get("company_logo_url", "cid:company_logo") == "cid:company_logo",
+    )
+
     Path(eml_path).write_text(msg.as_string(), encoding="utf-8")
     html_path = Path(eml_path).with_suffix(".html")
     html_path.write_text(html, encoding="utf-8")
     draft["html_path"] = str(html_path)
+    draft["dirty"] = False
     return eml_path
 
 
