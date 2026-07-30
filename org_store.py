@@ -501,3 +501,143 @@ def list_orgs_with_gmail() -> list[str]:
             return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+_ALLOWED_MEMBER_ROLES = frozenset({"owner", "admin", "member"})
+
+
+def list_organization_members(organization_id: str) -> list[dict]:
+    """List users that belong to an organization."""
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT u.id, u.email, u.name, om.role, om.created_at, u.created_at
+                FROM organization_members om
+                JOIN users u ON u.id = om.user_id
+                WHERE om.organization_id = %s
+                ORDER BY
+                    CASE om.role
+                        WHEN 'owner' THEN 0
+                        WHEN 'admin' THEN 1
+                        ELSE 2
+                    END,
+                    u.email ASC
+                """,
+                (organization_id,),
+            )
+            return [
+                {
+                    "id": r[0],
+                    "email": r[1],
+                    "name": r[2] or "",
+                    "role": r[3],
+                    "joined_at": r[4].isoformat() if r[4] else None,
+                    "created_at": r[5].isoformat() if r[5] else None,
+                }
+                for r in cur.fetchall()
+            ]
+    finally:
+        conn.close()
+
+
+def add_user_to_organization(
+    organization_id: str,
+    email: str,
+    password: str,
+    name: str = "",
+    role: str = "member",
+) -> dict:
+    """
+    Create a user (if needed) and add them to the organization.
+
+    - New email → create account with the given password, then join the org.
+    - Existing email → join the org (password is ignored; password is not changed).
+    """
+    email = email.strip().lower()
+    role = (role or "member").strip().lower()
+    if not email:
+        raise ValueError("Email is required")
+    if role not in _ALLOWED_MEMBER_ROLES:
+        raise ValueError(f"Role must be one of: {', '.join(sorted(_ALLOWED_MEMBER_ROLES))}")
+    if role == "owner":
+        raise ValueError("Cannot assign owner via invite — there can only be one bootstrap owner")
+
+    display = name.strip() or email.split("@")[0]
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM organizations WHERE id = %s", (organization_id,))
+            if not cur.fetchone():
+                raise ValueError("Organization not found")
+
+            cur.execute(
+                "SELECT id, name FROM users WHERE email = %s",
+                (email,),
+            )
+            row = cur.fetchone()
+            created = False
+            if row:
+                user_id, existing_name = row
+                if name.strip():
+                    cur.execute(
+                        "UPDATE users SET name = %s WHERE id = %s",
+                        (display, user_id),
+                    )
+                else:
+                    display = existing_name or display
+            else:
+                if not password or len(password) < 8:
+                    raise ValueError("Password must be at least 8 characters for a new user")
+                user_id = _new_id()
+                cur.execute(
+                    "INSERT INTO users (id, email, password_hash, name) VALUES (%s, %s, %s, %s)",
+                    (user_id, email, hash_password(password), display),
+                )
+                created = True
+
+            cur.execute(
+                """
+                SELECT role FROM organization_members
+                WHERE organization_id = %s AND user_id = %s
+                """,
+                (organization_id, user_id),
+            )
+            existing_membership = cur.fetchone()
+            if existing_membership:
+                if existing_membership[0] == role:
+                    raise ValueError("User is already a member of this organization")
+                cur.execute(
+                    """
+                    UPDATE organization_members
+                    SET role = %s
+                    WHERE organization_id = %s AND user_id = %s
+                    """,
+                    (role, organization_id, user_id),
+                )
+                action = "role_updated"
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO organization_members (organization_id, user_id, role)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (organization_id, user_id, role),
+                )
+                action = "added"
+
+        conn.commit()
+        return {
+            "id": user_id,
+            "email": email,
+            "name": display,
+            "role": role,
+            "created": created,
+            "action": action,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

@@ -18,6 +18,7 @@ import { PromptsPage } from './pages/PromptsPage'
 import { TemplatesPage } from './pages/TemplatesPage'
 import { RagLabPage } from './pages/RagLabPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { UsersPage } from './pages/UsersPage'
 import type { ReactNode } from 'react'
 
 const qc = new QueryClient()
@@ -60,6 +61,7 @@ export default function App() {
               <Route path="catalogues" element={<CataloguesPage />} />
               <Route path="knowledge" element={<Navigate to="/catalogues" replace />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="admin/users" element={<UsersPage />} />
               <Route path="admin/prompts" element={<PromptsPage />} />
               <Route path="admin/templates" element={<TemplatesPage />} />
               <Route path="admin/rag" element={<RagLabPage />} />

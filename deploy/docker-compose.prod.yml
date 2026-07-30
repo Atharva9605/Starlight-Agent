@@ -1,4 +1,4 @@
-# Production compose for VPS (technoventor-vps-new).
+# Production compose for VPS — build images locally on the host.
 #
 #   App  → https://mailer.starlightlinearled.com          (Caddy → starlight-mailer-web:80)
 #   API  → https://api.mailer.starlightlinearled.com      (Caddy → starlight-mailer-api:7860)
@@ -6,12 +6,14 @@
 #
 # Caddy owns 80/443 — this stack only joins deploy_default (no host port binds).
 #
-# Usage (from /opt/technoventor/starlight-mailer on the VPS):
+# Usage (from /opt/starlight/mailer on the VPS):
 #   docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
 #   cp deploy/mailer-web.caddy deploy/mailer-api.caddy /opt/technoventor/edge/sites/
 #   docker exec mis-vps-caddy-1 caddy reload --config /etc/caddy/Caddyfile
+#
+# Note: /opt/technoventor/edge is the shared host edge (Caddy), not a Starlight product path.
 
-name: technoventor-starlight-mailer
+name: starlight-mailer
 
 services:
   db:
@@ -39,7 +41,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: technoventor-starlight-mailer-api:latest
+    image: starlight-mailer-api:latest
     container_name: starlight-mailer-api
     restart: unless-stopped
     depends_on:
@@ -81,7 +83,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-https://api.mailer.starlightlinearled.com}
-    image: technoventor-starlight-mailer-web:latest
+    image: starlight-mailer-web:latest
     container_name: starlight-mailer-web
     restart: unless-stopped
     depends_on:
@@ -106,15 +108,15 @@ services:
 
 volumes:
   mailer_pgdata:
-    name: technoventor-starlight-mailer_pgdata
+    name: starlight-mailer_pgdata
   mailer_data:
-    name: technoventor-starlight-mailer_data
+    name: starlight-mailer_data
   mailer_attachments:
-    name: technoventor-starlight-mailer_attachments
+    name: starlight-mailer_attachments
   mailer_page_images:
-    name: technoventor-starlight-mailer_page_images
+    name: starlight-mailer_page_images
   mailer_chroma:
-    name: technoventor-starlight-mailer_chroma
+    name: starlight-mailer_chroma
 
 networks:
   deploy_default:

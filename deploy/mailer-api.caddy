@@ -1,6 +1,6 @@
 # Starlight AI Mailer — API route.
 # Install:
-#   cp /opt/technoventor/starlight-mailer/deploy/mailer-api.caddy /opt/technoventor/edge/sites/mailer-api.caddy
+#   cp /opt/starlight/mailer/deploy/mailer-api.caddy /opt/technoventor/edge/sites/mailer-api.caddy
 #   docker exec mis-vps-caddy-1 caddy reload --config /etc/caddy/Caddyfile
 # (Soft-reload only — never restart the edge container for product deploys.)
 

@@ -6,6 +6,15 @@ export type OrgMembership = {
   name?: string
 }
 
+export type OrgMember = {
+  id: string
+  email: string
+  name: string
+  role: string
+  joined_at?: string | null
+  created_at?: string | null
+}
+
 function authHeaders(extra: HeadersInit = {}): HeadersInit {
   const token = localStorage.getItem('token')
   return {
@@ -152,6 +161,18 @@ export const api = {
     return res.json()
   },
   aiEvents: () => request<{ events: any[] }>('/api/ai/events'),
+  orgMembers: () =>
+    request<{ members: OrgMember[]; count: number }>('/api/org/members'),
+  addOrgMember: (body: {
+    email: string
+    password?: string
+    name?: string
+    role?: string
+  }) =>
+    request<{ member: OrgMember & { created?: boolean; action?: string } }>(
+      '/api/org/members',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
 }
 
 export function getApiBase() {

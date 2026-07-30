@@ -34,12 +34,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!localStorage.getItem('token')) return
     const [meRes, brandRes] = await Promise.all([api.me(), api.branding().catch(() => null)])
     const normalized = {
+      id: meRes.user?.id,
       email: meRes.user?.email || (meRes as any).email,
       name: meRes.user?.name || (meRes as any).name,
+      role: meRes.organization?.role || meRes.organizations?.[0]?.role || 'member',
       organization_id:
         meRes.organization?.organization_id ||
         (meRes as any).organization_id ||
         meRes.organizations?.[0]?.organization_id,
+      organization_name: meRes.organization?.name || meRes.organizations?.[0]?.name,
       organizations: meRes.organizations || [],
     }
     setMe(normalized)

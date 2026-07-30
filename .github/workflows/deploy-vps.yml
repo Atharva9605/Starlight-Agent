@@ -1,12 +1,12 @@
 # =============================================================================
-# Starlight AI Mailer CI/CD — SSH-based deploy + Technoventor branded email
+# Starlight AI Mailer CI/CD — SSH-based deploy
 # =============================================================================
 # On push to main:
 #   build-and-push  → build & push api + web images to Docker Hub
-#                       ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-api
-#                       ${DOCKERHUB_USERNAME}/technoventor-starlight-mailer-web
-#   deploy-to-vps   → SSH to VPS, docker compose pull + up -d, health-gate, prune
-#   notify-success/ → Technoventor-branded Gmail (MAIL_* secrets)
+#                       ${DOCKERHUB_USERNAME}/starlight-mailer-api
+#                       ${DOCKERHUB_USERNAME}/starlight-mailer-web
+#   deploy-to-vps   → SSH to VPS, migrate legacy path if needed, pull + up -d
+#   notify-success/ → optional Gmail (MAIL_* secrets)
 #   notify-failure
 #
 # No HTTP deploy hook. Direct SSH into the VPS (VPS_SSH_KEY + VPS_IP secrets).
@@ -18,7 +18,7 @@
 #   MAIL_USERNAME  MAIL_PASSWORD (Gmail app password)  MAIL_TO
 #
 # One-time VPS prep (see deploy/README.md): register mailer-*.caddy with the
-# shared edge; place /opt/technoventor/starlight-mailer/.env
+# shared edge; place /opt/starlight/mailer/.env
 # =============================================================================
 
 name: Deploy Starlight Mailer to VPS
@@ -30,11 +30,12 @@ on:
   workflow_dispatch:
 
 env:
-  API_IMAGE: technoventor-starlight-mailer-api
-  WEB_IMAGE: technoventor-starlight-mailer-web
+  API_IMAGE: starlight-mailer-api
+  WEB_IMAGE: starlight-mailer-web
   APP_DOMAIN: mailer.starlightlinearled.com
   API_DOMAIN: api.mailer.starlightlinearled.com
-  VPS_DEPLOY_PATH: /opt/technoventor/starlight-mailer
+  VPS_DEPLOY_PATH: /opt/starlight/mailer
+  VPS_LEGACY_PATH: /opt/technoventor/starlight-mailer
 
 jobs:
   build-and-push:
@@ -89,11 +90,48 @@ jobs:
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
           chmod 600 ~/.ssh/vps_key
 
-      - name: Sync compose file to VPS
+      - name: Migrate path & sync compose
         run: |
           set -euo pipefail
-          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no root@${{ secrets.VPS_IP }} \
-            "mkdir -p ${{ env.VPS_DEPLOY_PATH }}/deploy && test -f ${{ env.VPS_DEPLOY_PATH }}/.env"
+          ssh -i ~/.ssh/vps_key -o StrictHostKeyChecking=no root@${{ secrets.VPS_IP }} bash -s <<'REMOTE_MIGRATE'
+            set -euo pipefail
+            NEW_PATH="/opt/starlight/mailer"
+            OLD_PATH="/opt/technoventor/starlight-mailer"
+
+            mkdir -p "$NEW_PATH/deploy"
+
+            # Move secrets from the legacy Technoventor path if needed.
+            if [ ! -f "$NEW_PATH/.env" ] && [ -f "$OLD_PATH/.env" ]; then
+              echo "Migrating .env from $OLD_PATH → $NEW_PATH"
+              cp "$OLD_PATH/.env" "$NEW_PATH/.env"
+            fi
+
+            if [ ! -f "$NEW_PATH/.env" ]; then
+              echo "FAILED: missing $NEW_PATH/.env (and no legacy copy at $OLD_PATH/.env)"
+              exit 1
+            fi
+
+            # Tear down the old compose project / volumes (fresh Starlight stack).
+            if [ -f "$OLD_PATH/deploy/docker-compose.cicd.yml" ]; then
+              echo "Stopping legacy stack at $OLD_PATH"
+              (cd "$OLD_PATH" && docker compose --env-file .env -f deploy/docker-compose.cicd.yml down -v --remove-orphans) || true
+            elif [ -f "$OLD_PATH/deploy/docker-compose.prod.yml" ]; then
+              echo "Stopping legacy stack at $OLD_PATH"
+              (cd "$OLD_PATH" && docker compose --env-file .env -f deploy/docker-compose.prod.yml down -v --remove-orphans) || true
+            fi
+
+            # Drop leftover named volumes from the old project name.
+            for vol in \
+              technoventor-starlight-mailer_pgdata \
+              technoventor-starlight-mailer_data \
+              technoventor-starlight-mailer_attachments \
+              technoventor-starlight-mailer_page_images \
+              technoventor-starlight-mailer_chroma
+            do
+              docker volume rm "$vol" 2>/dev/null || true
+            done
+          REMOTE_MIGRATE
+
           scp -i ~/.ssh/vps_key -o StrictHostKeyChecking=no \
             deploy/docker-compose.cicd.yml \
             root@${{ secrets.VPS_IP }}:${{ env.VPS_DEPLOY_PATH }}/deploy/docker-compose.cicd.yml
@@ -197,48 +235,37 @@ jobs:
           to: ${{ secrets.MAIL_TO }}
           from: Starlight Mailer CI/CD <${{ secrets.MAIL_USERNAME }}>
           convert_markdown: false
-          attachments: deploy/cicd/assets/logo.jpg,deploy/cicd/assets/banner.jpg
           html_body: |
             <!DOCTYPE html>
             <html lang="en">
             <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Deployment Succeeded</title></head>
-            <body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:40px 16px;">
+            <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 16px;">
                 <tr><td align="center">
-                  <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);border:1px solid #e5e7eb;">
+                  <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);border:1px solid #e2e8f0;">
                     <tr>
-                      <td style="background:#ffffff;padding:24px 32px;border-bottom:1px solid #f3f4f6;">
-                        <table width="100%" cellpadding="0" cellspacing="0"><tr>
-                          <td width="52" valign="middle"><img src="cid:logo.jpg" alt="Technoventor" height="40" style="display:block;border:0;height:40px;" /></td>
-                          <td valign="middle" style="padding-left:14px;">
-                            <p style="margin:0;font-size:15px;font-weight:700;color:#0d9488;line-height:1.3;">Technoventor Innovations Pvt Ltd.</p>
-                            <p style="margin:4px 0 0;font-size:11px;color:#64748b;">Starlight AI Mailer</p>
-                          </td>
-                        </tr></table>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td style="padding:0;line-height:0;">
-                        <img src="cid:banner.jpg" alt="Design · Develop · Deploy" width="620" style="display:block;width:100%;max-width:620px;height:auto;border:0;" />
+                      <td style="background:#2563eb;padding:22px 32px;">
+                        <p style="margin:0;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.02em;">Starlight Linear LED</p>
+                        <p style="margin:4px 0 0;font-size:12px;color:#bfdbfe;">AI Mailer · CI/CD</p>
                       </td>
                     </tr>
                     <tr>
                       <td style="padding:32px 32px 24px;">
-                        <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">Starlight Mailer is live!</p>
-                        <p style="margin:0;font-size:14px;color:#4b5563;line-height:1.5;">API + frontend images were built, pushed, and rolled out on the Technoventor VPS.</p>
+                        <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0f172a;">Starlight Mailer is live</p>
+                        <p style="margin:0;font-size:14px;color:#475569;line-height:1.5;">API + frontend images were built, pushed, and rolled out.</p>
                       </td>
                     </tr>
                     <tr>
                       <td style="padding:0 32px 24px;">
-                        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;border:1px solid #f1f5f9;">
+                        <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
                           <tr>
-                            <td style="padding:16px;border-bottom:1px solid #f1f5f9;">
+                            <td style="padding:16px;border-bottom:1px solid #e2e8f0;">
                               <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;">Commit</p>
                               <p style="margin:0;font-size:14px;color:#1e293b;font-weight:500;">${{ github.event.head_commit.message || github.event_name }}</p>
                             </td>
                           </tr>
                           <tr>
-                            <td style="padding:16px;border-bottom:1px solid #f1f5f9;">
+                            <td style="padding:16px;border-bottom:1px solid #e2e8f0;">
                               <table width="100%" cellpadding="0" cellspacing="0">
                                 <tr>
                                   <td width="50%">
@@ -264,9 +291,9 @@ jobs:
                       </td>
                     </tr>
                     <tr>
-                      <td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #f3f4f6;">
+                      <td style="background:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
                         <table width="100%" cellpadding="0" cellspacing="0"><tr>
-                          <td style="font-size:12px;color:#9ca3af;">Starlight Mailer CI/CD &bull; ${{ github.repository }}</td>
+                          <td style="font-size:12px;color:#94a3b8;">Starlight Mailer CI/CD &bull; ${{ github.repository }}</td>
                           <td align="right"><a href="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" style="color:#2563eb;font-size:12px;text-decoration:none;font-weight:600;">View GitHub Run</a></td>
                         </tr></table>
                       </td>
@@ -309,19 +336,18 @@ jobs:
           to: ${{ secrets.MAIL_TO }}
           from: Starlight Mailer CI/CD <${{ secrets.MAIL_USERNAME }}>
           convert_markdown: false
-          attachments: deploy/cicd/assets/logo.jpg,deploy/cicd/assets/banner.jpg
           html_body: |
             <!DOCTYPE html>
             <html lang="en">
             <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Deployment Failed</title></head>
-            <body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:40px 16px;">
+            <body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;padding:40px 16px;">
                 <tr><td align="center">
-                  <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+                  <table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
                     <tr>
                       <td style="padding:32px 32px 24px;">
-                        <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">Starlight Mailer deploy failed</p>
-                        <p style="margin:0;font-size:14px;color:#4b5563;line-height:1.5;">Open the GitHub Actions run for logs. Existing containers on the VPS were not intentionally removed by a failed health gate mid-pull — check the run output.</p>
+                        <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#0f172a;">Starlight Mailer deploy failed</p>
+                        <p style="margin:0;font-size:14px;color:#475569;line-height:1.5;">Open the GitHub Actions run for logs.</p>
                       </td>
                     </tr>
                     <tr>

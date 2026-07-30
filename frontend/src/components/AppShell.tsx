@@ -11,6 +11,7 @@ const salesLinks = [
 ]
 
 const adminLinks = [
+  { to: '/admin/users', label: 'Users', ico: '👥' },
   { to: '/admin/prompts', label: 'Prompt Studio', ico: '✨' },
   { to: '/admin/templates', label: 'Email Design', ico: '🖌' },
   { to: '/admin/rag', label: 'RAG Lab', ico: '🔬' },
@@ -18,8 +19,9 @@ const adminLinks = [
 
 export function AppShell() {
   const { me, logout } = useAuth()
-  const [adminOpen, setAdminOpen] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(true)
   const initial = (me?.name || me?.email || 'S').trim().charAt(0).toUpperCase()
+  const isAdmin = me?.role === 'owner' || me?.role === 'admin'
 
   return (
     <div className="app-shell">
@@ -49,6 +51,7 @@ export function AppShell() {
           </nav>
         </div>
 
+        {isAdmin ? (
         <div>
           <button
             type="button"
@@ -73,6 +76,7 @@ export function AppShell() {
             </nav>
           ) : null}
         </div>
+        ) : null}
 
         <div style={{ marginTop: 'auto' }} className="stack">
           <div className="user-chip">
@@ -82,7 +86,7 @@ export function AppShell() {
                 {me?.name || 'Starlight user'}
               </div>
               <div className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {me?.email}
+                {me?.email}{me?.role ? ` · ${me.role}` : ''}
               </div>
             </div>
           </div>

@@ -23,9 +23,11 @@ from auth import (
     decode_token,
 )
 from org_store import (
+    add_user_to_organization,
     authenticate_user,
     create_user_with_org,
     get_user_by_id,
+    list_organization_members,
 )
 from tenant import get_organization_id, run_in_thread
 import gmail_oauth
@@ -111,6 +113,29 @@ class LoginRequest(BaseModel):
 
 class SwitchOrgRequest(BaseModel):
     organization_id: str
+
+
+class AddOrgMemberRequest(BaseModel):
+    email: str
+    password: str = ""
+    name: str = ""
+    role: str = "member"
+
+
+_ADMIN_ROLES = frozenset({"owner", "admin"})
+
+
+def _require_org_admin():
+    """Raise 403 unless the current tenant is an org owner/admin."""
+    from tenant import get_tenant_context
+
+    ctx = get_tenant_context()
+    if ctx.role not in _ADMIN_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Only organization owners and admins can manage users",
+        )
+    return ctx
 
 
 _auth_attempts: dict[str, list[float]] = {}
@@ -233,6 +258,29 @@ async def switch_org(body: SwitchOrgRequest):
         "token": token,
         "organization": membership,
     }
+
+
+@app.get("/api/org/members")
+async def org_members():
+    ctx = _require_org_admin()
+    members = list_organization_members(ctx.organization_id)
+    return {"members": members, "count": len(members)}
+
+
+@app.post("/api/org/members")
+async def org_add_member(body: AddOrgMemberRequest):
+    ctx = _require_org_admin()
+    try:
+        member = add_user_to_organization(
+            organization_id=ctx.organization_id,
+            email=body.email,
+            password=body.password,
+            name=body.name,
+            role=body.role,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"member": member}
 
 
 @app.get("/api/integrations/gmail/authorize")
