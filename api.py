@@ -29,7 +29,8 @@ from org_store import (
     get_user_by_id,
     list_organization_members,
 )
-from tenant import get_organization_id, run_in_thread
+from tenant import get_organization_id, get_tenant_context, run_in_thread
+from ingest_jobs import get_job, start_ingest_job
 import gmail_oauth
 
 # Import project modules
@@ -37,7 +38,6 @@ from scraper import scrape_and_process
 from generator_v2 import generate_eml_from_record, query_rag_with_trace
 from template_generator import generate_template_html
 from send_eml_gsuite import send_email_gsuite, send_threaded_reply, check_gmail_health
-from rag_uploader import process_pdf_to_chroma
 from vector_store import init_db, get_status, clear_all, use_postgres
 import conversation_store as conv_store
 from conversation_agent import (
@@ -750,45 +750,39 @@ async def get_kb():
 @app.post("/api/upload-catalogue")
 @app.post("/api/upload-catalogues")
 async def upload_catalogues(files: List[UploadFile] = File(...)):
-    results = []
+    """
+    Stage the uploads and hand them to a background worker.
+
+    A scanned catalogue takes minutes of GPT-4o Vision per file. Returning the
+    job id straight away keeps the request short, so a proxy or browser idle
+    timeout can no longer report "Failed to fetch" for work that is actually
+    still running. The client polls /api/catalogue-jobs/{id} for progress.
+    """
+    staged: list[tuple[str, str]] = []
     for file in files:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             shutil.copyfileobj(file.file, tmp)
-            tmp_path = tmp.name
+            staged.append((file.filename or "catalogue.pdf", tmp.name))
 
-        try:
-            class MockFile:
-                name = file.filename
-                def read(self):
-                    with open(tmp_path, "rb") as f:
-                        return f.read()
+    job_id = start_ingest_job(staged, get_tenant_context())
+    return JSONResponse(
+        status_code=202,
+        content={
+            "job_id": job_id,
+            "total_files": len(staged),
+            "status": "running",
+        },
+    )
 
-            # Scanned catalogues run GPT-4o Vision per page — keep it off the
-            # event loop. run_in_thread carries the tenant context that
-            # add_chunks() needs to scope rows to this organization.
-            success, msg = await run_in_thread(
-                process_pdf_to_chroma, MockFile(), progress_callback=None
-            )
-            results.append({"filename": file.filename, "success": success, "message": msg})
-        except Exception as e:
-            results.append({"filename": file.filename, "success": False, "message": str(e)})
-        finally:
-            os.remove(tmp_path)
 
-    chunks, catalogues = get_status()
-    ingested = [r for r in results if r["success"]]
-    if not ingested:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "results": results,
-                "chunks": chunks,
-                "catalogues": catalogues,
-                "detail": "; ".join(r["message"] for r in results) or "Ingestion failed",
-            },
-        )
-    return {"results": results, "chunks": chunks, "catalogues": catalogues}
-    
+@app.get("/api/catalogue-jobs/{job_id}")
+async def catalogue_job_status(job_id: str):
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown or expired job")
+    return job
+
+
 @app.post("/api/clear-kb")
 async def clear_kb():
     try:

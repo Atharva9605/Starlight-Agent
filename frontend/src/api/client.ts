@@ -18,6 +18,19 @@ export type CatalogueUploadResult = {
   catalogues?: string[]
 }
 
+export type CatalogueJob = {
+  id: string
+  status: 'running' | 'done' | 'error'
+  progress: number
+  message: string
+  current_file: string
+  total_files: number
+  completed_files: number
+  results: CatalogueFileResult[]
+  chunks: number
+  catalogues: string[]
+}
+
 export type OrgMember = {
   id: string
   email: string
@@ -161,7 +174,8 @@ export const api = {
     if (!res.ok) throw new Error(await res.text())
     return res.json()
   },
-  uploadCatalogues: async (files: FileList): Promise<CatalogueUploadResult> => {
+  /** Starts ingestion and returns a job id; poll catalogueJob for progress. */
+  uploadCatalogues: async (files: FileList): Promise<{ job_id: string; total_files: number }> => {
     const fd = new FormData()
     Array.from(files).forEach((f) => fd.append('files', f))
     const res = await fetch(`${API_URL}/api/upload-catalogues`, {
@@ -184,8 +198,9 @@ export const api = {
       err.results = body?.results
       throw err
     }
-    return body as CatalogueUploadResult
+    return body as { job_id: string; total_files: number }
   },
+  catalogueJob: (jobId: string) => request<CatalogueJob>(`/api/catalogue-jobs/${jobId}`),
   campaignGenerate: (body: {
     lead: Record<string, any>
     template: string

@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, type CatalogueFileResult } from '../api/client'
 import { Link } from 'react-router-dom'
 import { Dropzone } from '../components/Dropzone'
+
+const POLL_MS = 2000
 
 /** Sales-facing catalogues page — no JSON / RAG dump. */
 export function CataloguesPage() {
@@ -11,18 +13,36 @@ export function CataloguesPage() {
   const [error, setError] = useState('')
   const [fileResults, setFileResults] = useState<CatalogueFileResult[]>([])
   const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const cancelled = useRef(false)
+
+  useEffect(() => () => { cancelled.current = true }, [])
 
   const upload = async (files?: FileList | null) => {
     if (!files?.length) return
     setBusy(true)
     setError('')
     setFileResults([])
-    setMsg('Reading catalogue… scanned PDFs take a few minutes.')
+    setProgress(0)
+    setMsg('Uploading…')
     try {
-      const res = await api.uploadCatalogues(files)
-      setFileResults(res.results || [])
-      const added = (res.results || []).filter((r) => r.success).length
-      setMsg(`Indexed ${added} of ${files.length}`)
+      const { job_id } = await api.uploadCatalogues(files)
+      setMsg('Reading catalogue… scanned PDFs take a few minutes.')
+
+      // Ingestion runs server-side; poll so a slow catalogue can't time the
+      // request out, and so progress is visible while it works.
+      for (;;) {
+        await new Promise((r) => setTimeout(r, POLL_MS))
+        if (cancelled.current) return
+        const job = await api.catalogueJob(job_id)
+        setProgress(job.progress || 0)
+        setMsg(job.message || 'Working…')
+        setFileResults(job.results || [])
+        if (job.status !== 'running') {
+          if (job.status === 'error') setError(job.message || 'Ingestion failed')
+          break
+        }
+      }
       await kb.refetch()
     } catch (e: any) {
       setError(e.message || 'Upload failed')
@@ -75,6 +95,20 @@ export function CataloguesPage() {
           hint="or click to choose files · PDF, TXT, DOCX"
           onFiles={upload}
         />
+
+        {busy ? (
+          <div className="stack" style={{ gap: 6 }}>
+            <div className="progress">
+              <div
+                className="progress-fill animated"
+                style={{ width: `${Math.max(3, Math.round(progress * 100))}%` }}
+              />
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>
+              {msg} · {Math.round(progress * 100)}%
+            </div>
+          </div>
+        ) : null}
 
         {error ? (
           <div className="alert danger">
