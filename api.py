@@ -7,6 +7,7 @@ import re
 from functools import partial
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse, HTMLResponse, RedirectResponse
@@ -815,12 +816,13 @@ async def process_leads(req: ProcessRequest):
                     raise Exception("EML generation failed.")
                 
                 # Load HTML preview
+                html_content = ""
                 html_path = Path(eml_path).with_suffix(".html")
                 if html_path.exists():
                     with open(html_path, 'r', encoding='utf-8') as f:
                         html_content = f.read()
                     
-                    yield f"data: {json.dumps({'type': 'preview_html', 'html': html_content})}\n\n"
+                    yield f"data: {json.dumps({'type': 'preview_html', 'row_index': idx, 'subject': (trace_info or {}).get('subject', ''), 'html': html_content})}\n\n"
                 
                 # Send RAG Trace Info
                 yield f"data: {json.dumps({'type': 'rag_trace', 'row_index': idx, 'data': {'company': scraped_data.get('company', website), 'website': website, 'trace_info': trace_info}})}\n\n"
@@ -851,14 +853,18 @@ async def process_leads(req: ProcessRequest):
                     try:
                         await asyncio.to_thread(
                             record_outbound_from_pipeline,
-                            recipient_email,
-                            scraped_data,
-                            subject,
-                            html_content if html_path.exists() else "",
-                            body_text,
-                            send_result.get("message_id"),
-                            send_result.get("thread_id"),
-                            req.template,
+                            client_email=recipient_email,
+                            client_company=row.get("company")
+                            or scraped_data.get("company")
+                            or urlparse(website).netloc.replace("www.", ""),
+                            client_website=website,
+                            subject=subject,
+                            body_html=html_content,
+                            body_text=body_text,
+                            profile_json=scraped_data,
+                            template_name=req.template,
+                            gmail_message_id=send_result.get("message_id") or "",
+                            gmail_thread_id=send_result.get("thread_id") or "",
                         )
                         yield f"data: {json.dumps({'type': 'log', 'message': f'Conversation created for {recipient_email}'})}\n\n"
                     except Exception as conv_err:

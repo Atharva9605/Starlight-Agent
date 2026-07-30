@@ -122,6 +122,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ content, label }),
     }),
+  previewTemplate: (template_name: string, sample_data?: Record<string, any>) =>
+    request<{ html: string }>('/api/templates/preview/json', {
+      method: 'POST',
+      body: JSON.stringify({ template_name, sample_data }),
+    }),
   ragQuery: (client_desc: string, k = 5) =>
     request('/api/rag/query', { method: 'POST', body: JSON.stringify({ client_desc, k }) }),
   uploadLeads: async (file: File) => {
