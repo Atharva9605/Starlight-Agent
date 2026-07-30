@@ -716,10 +716,11 @@ async def reset_builtin_template(name: str):
 @app.post("/api/templates/generate")
 async def generate_template_ai(body: TemplateGenerateRequest):
     try:
-        content = generate_template_html(
-            instructions=body.instructions,
-            style=body.style,
-            reference_template=body.reference_template,
+        content = await run_in_thread(
+            generate_template_html,
+            body.instructions,
+            body.style,
+            body.reference_template,
         )
         return {"content": content}
     except ValueError as e:

@@ -149,17 +149,42 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ content }),
     }),
-  templates: () => request<{ templates: any[] } | any[]>('/api/templates'),
+  templates: () =>
+    request<{ templates: Array<{ name: string; label: string; builtin?: boolean; is_custom?: boolean }> } | any[]>(
+      '/api/templates',
+    ).then((res) => {
+      const list = Array.isArray(res) ? res : res.templates || []
+      return list.map((t: any) =>
+        typeof t === 'string'
+          ? { name: t, label: t.replace(/^email_template_?/, '').replace(/\.html$/, '') || 'Modern Soft' }
+          : t,
+      ) as Array<{ name: string; label: string; builtin?: boolean; is_custom?: boolean }>
+    }),
   getTemplate: (name: string) => request<{ name: string; content: string }>(`/api/templates/${name}`),
   saveTemplate: (name: string, content: string, label?: string) =>
-    request(`/api/templates/${name}`, {
+    request<{ name: string; label: string }>(`/api/templates/${name}`, {
       method: 'PUT',
       body: JSON.stringify({ content, label }),
     }),
-  previewTemplate: (template_name: string, sample_data?: Record<string, any>) =>
+  deleteTemplate: (name: string) =>
+    request(`/api/templates/${name}`, { method: 'DELETE' }),
+  previewTemplate: (opts: {
+    template_name?: string
+    template_content?: string
+    sample_data?: Record<string, any>
+  }) =>
     request<{ html: string }>('/api/templates/preview/json', {
       method: 'POST',
-      body: JSON.stringify({ template_name, sample_data }),
+      body: JSON.stringify(opts),
+    }),
+  generateTemplate: (body: {
+    instructions: string
+    style?: string
+    reference_template?: string | null
+  }) =>
+    request<{ content: string }>('/api/templates/generate', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
   ragQuery: (client_desc: string, k = 5) =>
     request('/api/rag/query', { method: 'POST', body: JSON.stringify({ client_desc, k }) }),

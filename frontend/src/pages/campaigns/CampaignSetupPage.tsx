@@ -1,7 +1,25 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Dropzone } from '../../components/Dropzone'
 import { TEMPLATES, useCampaign } from '../../campaign/CampaignContext'
+import { api } from '../../api/client'
+
+type TemplateOption = { value: string; label: string; blurb: string; swatch: string[] }
+
+const SWATCHES: Record<string, string[]> = {
+  'email_template.html': ['#2563eb', '#06b6d4'],
+  'email_template_minimalist.html': ['#0f172a', '#64748b'],
+  'email_template_bold.html': ['#f59e0b', '#e11d48'],
+}
+
+function toOption(t: { name: string; label: string; is_custom?: boolean }): TemplateOption {
+  return {
+    value: t.name,
+    label: t.label || t.name,
+    blurb: t.is_custom ? 'Custom AI / saved design.' : TEMPLATES.find((x) => x.value === t.name)?.blurb || 'Org template.',
+    swatch: SWATCHES[t.name] || (t.is_custom ? ['#0d9488', '#14b8a6'] : ['#2563eb', '#06b6d4']),
+  }
+}
 
 /** Page 1 — upload leads, pick template, launch (review or autosend). */
 export function CampaignSetupPage() {
@@ -27,6 +45,29 @@ export function CampaignSetupPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [launching, setLaunching] = useState(false)
+  const [templateOptions, setTemplateOptions] = useState<TemplateOption[]>(TEMPLATES)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .templates()
+      .then((list) => {
+        if (cancelled || !list.length) return
+        const options = list.map(toOption)
+        setTemplateOptions(options)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!templateOptions.length) return
+    if (!templateOptions.some((t) => t.value === template)) {
+      setTemplate(templateOptions[0].value)
+    }
+  }, [templateOptions, template, setTemplate])
 
   const onFiles = async (files: FileList) => {
     setBusy(true)
@@ -129,7 +170,7 @@ export function CampaignSetupPage() {
         <div className="stack">
           <div className="panel stack">
             <strong style={{ fontFamily: 'var(--display)' }}>2 · Template</strong>
-            {TEMPLATES.map((t) => (
+            {templateOptions.map((t) => (
               <button
                 key={t.value}
                 type="button"
@@ -147,6 +188,9 @@ export function CampaignSetupPage() {
                 <span className="template-check">{template === t.value ? '✓' : ''}</span>
               </button>
             ))}
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Need a new look? Create one under Admin → Email Design with AI.
+            </p>
           </div>
 
           <div className="panel stack">
