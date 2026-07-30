@@ -231,19 +231,25 @@ def process_pdf_to_chroma(
                     # Map ingestor 0–1 into our 0.08–1.0 range
                     progress_callback(0.08 + 0.92 * pct, msg)
 
-            # Write the temp file path and pass it to the ingestor
-            # (ingestor expects a file path, not a file object)
+            # The ingestor takes a path and derives the catalogue name, slug and
+            # dedup key from its basename. Copy into a temp *directory* rather
+            # than prefixing the temp name, otherwise the random tmp segment
+            # ends up in the display name and changes on every upload — which
+            # makes force_reingest miss the previous rows and pile up duplicates.
             import shutil
-            named_temp = temp_path + "_" + source_name
+
+            staging_dir = tempfile.mkdtemp()
+            named_temp = os.path.join(staging_dir, os.path.basename(source_name))
             shutil.copy(temp_path, named_temp)
 
-            summary = ingest_catalogue(
-                pdf_path=named_temp,
-                progress_callback=_wrapped_cb,
-                force_reingest=True,
-            )
-
-            os.remove(named_temp)
+            try:
+                summary = ingest_catalogue(
+                    pdf_path=named_temp,
+                    progress_callback=_wrapped_cb,
+                    force_reingest=True,
+                )
+            finally:
+                shutil.rmtree(staging_dir, ignore_errors=True)
 
             if summary["total_chunks"] == 0:
                 return False, (
