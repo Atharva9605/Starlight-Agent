@@ -501,27 +501,39 @@ def generate_eml_from_record(
 
     preamble = _pick_text(
         parsed.get("preamble"),
-        "Precision-engineered LED solutions, delivered on time.",
+        "Architectural linear LED, manufactured near Pune.",
     )
     opening_line = _pick_text(
         parsed.get("opening_line"),
-        "Hope this email finds you well.",
+        "Hope this note finds you well.",
     )
-    intro = _pick_text(
-        parsed.get("intro"),
-        (
-            "We noticed your recent work and wanted to share a few Starlight linear LED "
-            "options that tend to fit hospitality and commercial interiors."
-        ),
-    ).replace("\n", "<br>")
-    feature_highlights = _pick_list(
-        parsed.get("feature_highlights"),
-        [
-            "High-CRI linear LED for clean architectural lines",
-            "Custom lengths with seamless joins for continuous runs",
-            "Reliable lead times suited to project schedules",
-        ],
+
+    product_names = [
+        str(r.get("product_name") or "").strip()
+        for r in (product_refs or [])
+        if str(r.get("product_name") or "").strip()
+    ]
+    default_intro = (
+        f"We work with practices that treat lighting as a design material. "
+        f"From the Starlight linear range, {', '.join(product_names[:3])} "
+        f"are often a fit for hospitality and commercial interiors."
+        if product_names
+        else (
+            "We work with practices that treat lighting as a design material, "
+            "and wanted to share a few Starlight linear LED options that may suit your projects."
+        )
     )
+    intro = _pick_text(parsed.get("intro"), default_intro).replace("\n", "<br>")
+
+    default_features = [
+        f"{name} — see catalogue details in the cards below"
+        for name in product_names[:3]
+    ] or [
+        "High-CRI linear profiles for clean architectural lines",
+        "Custom lengths with seamless joins for continuous runs",
+        "Reliable lead times suited to project schedules",
+    ]
+    feature_highlights = _pick_list(parsed.get("feature_highlights"), default_features)
     use_cases = _pick_list(
         parsed.get("use_cases"),
         [
@@ -534,10 +546,7 @@ def generate_eml_from_record(
     bullets = []
     cta = _pick_text(
         parsed.get("cta"),
-        (
-            "Would you be available for a brief call next week to explore how we can "
-            "illuminate your next project?"
-        ),
+        "Would it be convenient to visit your studio with a sample kit, at a time that works for you?",
     )
 
     # Render template

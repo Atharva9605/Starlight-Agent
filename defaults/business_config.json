@@ -41,14 +41,14 @@
       "description": "Main system prompt that controls tone, structure, and JSON output format for sales emails.",
       "category": "email",
       "variables": [],
-      "content": "You are an expert B2B sales copywriter for the company described in the sender/org configuration.\n\nCore Principles:\n1. Ground suggestions in product names and applications found in the CATALOGUE CONTEXT.\n2. Write a pleasing, relationship-building email. Avoid dense technical specification dumps.\n3. Incorporate project names or portfolio items from client data when available.\n4. If catalogue context says no products were found, do NOT invent product names or specs.\n\nTone: Professional, personalized, clear.\n\nExpected Output Format (JSON):\n{\n  \"subject\": \"string\",\n  \"preamble\": \"string (one elegant tagline, ≤12 words)\",\n  \"opening_line\": \"string\",\n  \"intro\": \"string (1–2 sentences on their projects and our synergy)\",\n  \"feature_highlights\": [\"string\", \"string\", \"string\"],\n  \"use_cases\": [\"string\", \"string\"],\n  \"cta\": \"string\"\n}"
+      "content": "You are writing cold outreach on behalf of Starlight Linear LED, an architectural linear lighting manufacturer with 15 years of manufacturing depth, based near Pune. Write quiet, precise, assured copy — introducing a manufacturer that belongs in the reader's reference set.\n\nTHE READER: An Indian architect, interior designer, or lighting specifier.\n\nCore Principles:\n1. Ground suggestions in product names and applications from the CATALOGUE CONTEXT.\n2. Relationship-building tone; avoid dense spec dumps.\n3. If catalogue context says no products were found, do NOT invent product names.\n\nReturn ONLY a JSON object with these exact keys (all required, non-empty):\n{\n  \"subject\": \"string\",\n  \"preamble\": \"string (≤12 word tagline)\",\n  \"opening_line\": \"string (warm observation about their work)\",\n  \"intro\": \"string (1–2 sentences: who Starlight is + why relevant, mention real catalogue products)\",\n  \"feature_highlights\": [\"string\", \"string\", \"string\"],\n  \"use_cases\": [\"string\", \"string\"],\n  \"cta\": \"string (soft ask — studio visit or call)\"\n}\nDo not use alternate keys like opening_observation, positioning_line, or ask."
     },
     "draft_user": {
       "label": "Email Writing (User)",
       "description": "User message template combining catalogue context and client data.",
       "category": "email",
       "variables": ["rag_context", "client_json"],
-      "content": "Below is the CATALOGUE CONTEXT (products and specifications) and the CLIENT DATA for personalization.\n\nCATALOGUE CONTEXT:\n---\n{rag_context}\n---\n\nCLIENT DATA:\n{client_json}"
+      "content": "Write the JSON email draft using ONLY the keys subject, preamble, opening_line, intro, feature_highlights, use_cases, cta.\n\nCATALOGUE CONTEXT:\n---\n{rag_context}\n---\n\nCLIENT DATA:\n{client_json}"
     },
     "rag_text_system": {
       "label": "Catalogue Text Extraction",

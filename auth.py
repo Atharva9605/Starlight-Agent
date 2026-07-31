@@ -103,6 +103,10 @@ def _is_public_path(path: str) -> bool:
         return True
     if path.startswith("/docs") or path.startswith("/redoc"):
         return True
+    # Catalogue page images + attachments must be fetchable by email clients
+    # (no JWT). Only expose the static media tree, never /api/*.
+    if path.startswith("/media/"):
+        return True
     return False
 
 
