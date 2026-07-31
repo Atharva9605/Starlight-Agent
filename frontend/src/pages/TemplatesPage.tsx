@@ -179,11 +179,11 @@ export function TemplatesPage() {
   const current = templates.find((t) => t.name === selected)
 
   return (
-    <div>
+    <div className="design-screen">
       <div className="page-hero">
         <div>
           <h1>Email Design</h1>
-          <p>Preview-first Starlight templates — or let AI draft a new one.</p>
+          <p>Preview how customers see the email — pick a template or draft one with AI.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn secondary" type="button" disabled={busy} onClick={() => setShowAi((v) => !v)}>
@@ -206,7 +206,7 @@ export function TemplatesPage() {
             <span>Instructions</span>
             <textarea
               className="textarea"
-              rows={4}
+              rows={3}
               value={instructions}
               disabled={busy}
               onChange={(e) => setInstructions(e.target.value)}
@@ -245,10 +245,22 @@ export function TemplatesPage() {
         </div>
       ) : null}
 
-      <div className="panel stack" style={{ marginBottom: '1rem' }}>
-        <div className="grid-2" style={{ gap: '0.75rem' }}>
+      <div className="design-body">
+        <div className="design-mail">
+          <div className="design-preview-label muted">
+            Customer preview{previewing ? ' · refreshing…' : ''}
+          </div>
+          <EmailPreviewFrame
+            html={previewHtml || content}
+            subject="Sample Starlight email"
+            fullscreen
+          />
+        </div>
+
+        <aside className="design-side panel stack">
+          <strong style={{ fontFamily: 'var(--display)' }}>Template</strong>
           <label className="field">
-            <span>Template</span>
+            <span>Choose design</span>
             <select
               className="select"
               value={selected}
@@ -258,13 +270,23 @@ export function TemplatesPage() {
               {templates.map((t) => (
                 <option key={t.name} value={t.name}>
                   {displayLabel(t)}
-                  {t.is_custom ? ' · custom' : ''} ({t.name})
+                  {t.is_custom ? ' · custom' : ''}
                 </option>
               ))}
             </select>
           </label>
           <label className="field">
-            <span>Save as name</span>
+            <span>Display label</span>
+            <input
+              className="input"
+              value={saveLabel}
+              disabled={busy}
+              onChange={(e) => setSaveLabel(e.target.value)}
+              placeholder="My design"
+            />
+          </label>
+          <label className="field">
+            <span>Save as filename</span>
             <input
               className="input"
               value={saveName}
@@ -273,38 +295,23 @@ export function TemplatesPage() {
               placeholder="email_template_my_design.html"
             />
           </label>
-        </div>
-        <label className="field">
-          <span>Display label</span>
-          <input
-            className="input"
-            value={saveLabel}
-            disabled={busy}
-            onChange={(e) => setSaveLabel(e.target.value)}
-            placeholder="My design"
-          />
-        </label>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {msg ? <span className="pill ok">{msg}</span> : null}
+          {error ? (
+            <div className="alert danger">
+              <strong>Template error</strong>
+              <div style={{ marginTop: 4 }}>{error}</div>
+            </div>
+          ) : null}
           {current?.is_custom ? (
             <button className="btn danger" type="button" disabled={busy} onClick={remove}>
               Delete custom
             </button>
-          ) : null}
-        </div>
-        {error ? (
-          <div className="alert danger">
-            <strong>Template error</strong>
-            <div style={{ marginTop: 4 }}>{error}</div>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="panel tint-blue stack">
-        <strong style={{ fontFamily: 'var(--display)' }}>
-          Customer preview{previewing ? ' · refreshing…' : ''}
-        </strong>
-        <EmailPreviewFrame html={previewHtml || content} subject="Sample Starlight email" />
+          ) : (
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+              Built-in templates stay read-only — save under a new name to keep edits.
+            </p>
+          )}
+        </aside>
       </div>
     </div>
   )

@@ -483,6 +483,42 @@ button, input, select, textarea { font: inherit; color: inherit; }
   flex: 1;
   box-shadow: var(--shadow-lg);
 }
+
+.design-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: calc(100vh - 3rem);
+}
+.design-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.55fr);
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+.design-mail {
+  min-height: calc(100vh - 11rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.design-mail .email-chrome.fullscreen {
+  flex: 1;
+  box-shadow: var(--shadow-lg);
+}
+.design-preview-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.design-side {
+  align-self: start;
+  position: sticky;
+  top: 1rem;
+}
 .review-side {
   display: flex;
   flex-direction: column;
@@ -543,8 +579,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .skeleton-frame.tall { min-height: calc(100vh - 10rem); }
 
 @media (max-width: 1100px) {
-  .setup-grid, .review-body { grid-template-columns: 1fr; }
-  .review-mail { min-height: 55vh; }
+  .setup-grid, .review-body, .design-body { grid-template-columns: 1fr; }
+  .review-mail, .design-mail { min-height: 55vh; }
+  .design-side { position: static; }
   .skeleton-frame.tall { min-height: 50vh; }
 }
 .email-chrome-bar {
