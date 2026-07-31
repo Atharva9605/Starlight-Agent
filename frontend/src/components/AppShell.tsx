@@ -13,7 +13,8 @@ const salesLinks = [
 const adminLinks = [
   { to: '/admin/users', label: 'Users', ico: '👥' },
   { to: '/admin/prompts', label: 'Prompt Studio', ico: '✨' },
-  { to: '/admin/templates', label: 'Email Design', ico: '🖌' },
+  { to: '/admin/templates', label: 'Email Design', ico: '🖌', end: true },
+  { to: '/admin/templates/create', label: 'Create with AI', ico: '✦' },
   { to: '/admin/rag', label: 'RAG Lab', ico: '🔬' },
 ]
 
@@ -67,6 +68,7 @@ export function AppShell() {
                 <NavLink
                   key={l.to}
                   to={l.to}
+                  end={l.end}
                   className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
                 >
                   <span className="ico">{l.ico}</span>

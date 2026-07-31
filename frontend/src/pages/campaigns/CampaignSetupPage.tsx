@@ -118,7 +118,7 @@ export function CampaignSetupPage() {
               accept=".xlsx,.xls,.csv"
               busy={busy}
               title="Drop Excel / CSV here"
-              hint="Must include a website column · click or drag"
+              hint="Needs a website column · optional email column is used as the recipient"
               onFiles={onFiles}
             />
             {error ? <div className="alert danger">{error}</div> : null}
@@ -143,6 +143,7 @@ export function CampaignSetupPage() {
                     <tr>
                       <th>#</th>
                       <th>Website</th>
+                      <th>Email</th>
                       <th>Company</th>
                       <th />
                     </tr>
@@ -152,6 +153,13 @@ export function CampaignSetupPage() {
                       <tr key={i}>
                         <td className="muted">{i + 1}</td>
                         <td style={{ fontWeight: 600 }}>{l.website || '—'}</td>
+                        <td>
+                          {l.email ? (
+                            l.email
+                          ) : (
+                            <span className="muted">scrape</span>
+                          )}
+                        </td>
                         <td>{l.company || <span className="muted">auto</span>}</td>
                         <td>
                           <button className="icon-btn" type="button" onClick={() => removeLead(i)}>
@@ -189,7 +197,7 @@ export function CampaignSetupPage() {
               </button>
             ))}
             <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Need a new look? Create one under Admin → Email Design with AI.
+              Need a new look? Create one under Admin → Create with AI.
             </p>
           </div>
 

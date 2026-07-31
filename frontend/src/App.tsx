@@ -13,6 +13,7 @@ import { CampaignLivePage } from './pages/campaigns/CampaignLivePage'
 import { CataloguesPage } from './pages/CataloguesPage'
 import { PromptsPage } from './pages/PromptsPage'
 import { TemplatesPage } from './pages/TemplatesPage'
+import { AiCreateTemplatePage } from './pages/AiCreateTemplatePage'
 import { RagLabPage } from './pages/RagLabPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UsersPage } from './pages/UsersPage'
@@ -57,9 +58,11 @@ export default function App() {
               <Route path="admin/users" element={<UsersPage />} />
               <Route path="admin/prompts" element={<PromptsPage />} />
               <Route path="admin/templates" element={<TemplatesPage />} />
+              <Route path="admin/templates/create" element={<AiCreateTemplatePage />} />
               <Route path="admin/rag" element={<RagLabPage />} />
               <Route path="prompts" element={<Navigate to="/admin/prompts" replace />} />
               <Route path="templates" element={<Navigate to="/admin/templates" replace />} />
+              <Route path="templates/create" element={<Navigate to="/admin/templates/create" replace />} />
             </Route>
           </Routes>
         </BrowserRouter>

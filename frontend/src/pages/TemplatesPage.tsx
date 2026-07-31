@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { EmailPreviewFrame } from '../components/EmailPreviewFrame'
 
@@ -8,12 +9,6 @@ type TemplateMeta = {
   builtin?: boolean
   is_custom?: boolean
 }
-
-const STYLES = [
-  { value: 'modern', label: 'Modern Soft' },
-  { value: 'minimal', label: 'Minimalist' },
-  { value: 'bold', label: 'Bold & Vibrant' },
-]
 
 function slugify(label: string): string {
   const base = label
@@ -32,33 +27,30 @@ function displayLabel(t: TemplateMeta): string {
   return t.name.replace(/^email_template_?/, '').replace(/\.html$/, '').replace(/_/g, ' ') || t.name
 }
 
-/** Admin page — pick, preview, AI-create, and save email HTML templates. */
+/** Admin page — pick, preview, and save email HTML templates. */
 export function TemplatesPage() {
+  const [searchParams] = useSearchParams()
+  const preferSelected = searchParams.get('selected') || ''
+
   const [templates, setTemplates] = useState<TemplateMeta[]>([])
   const [selected, setSelected] = useState('')
   const [content, setContent] = useState('')
   const [previewHtml, setPreviewHtml] = useState('')
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
-  const [showAi, setShowAi] = useState(false)
   const [busy, setBusy] = useState(false)
   const [previewing, setPreviewing] = useState(false)
-
-  const [instructions, setInstructions] = useState(
-    'Clean Starlight LED outreach email with logo header, short personalized intro, feature highlights, use cases, and a clear CTA. Keep it mobile-friendly.',
-  )
-  const [style, setStyle] = useState('modern')
-  const [useReference, setUseReference] = useState(true)
   const [saveName, setSaveName] = useState('')
   const [saveLabel, setSaveLabel] = useState('')
 
   const refreshList = useCallback(async (prefer?: string) => {
     const list = await api.templates()
     setTemplates(list)
-    const next = prefer && list.some((t) => t.name === prefer) ? prefer : list[0]?.name || ''
-    setSelected((prev) => (prefer ? next : prev || next))
+    const want = prefer || preferSelected
+    const next = want && list.some((t) => t.name === want) ? want : list[0]?.name || ''
+    setSelected((prev) => (prefer || preferSelected ? next : prev || next))
     return list
-  }, [])
+  }, [preferSelected])
 
   useEffect(() => {
     refreshList().catch((e) => setError(e.message || 'Could not load templates'))
@@ -108,34 +100,6 @@ export function TemplatesPage() {
     }
   }, [content])
 
-  const generate = async () => {
-    if (!instructions.trim()) {
-      setError('Describe the template you want.')
-      return
-    }
-    setBusy(true)
-    setError('')
-    setMsg('Generating with AI…')
-    try {
-      const res = await api.generateTemplate({
-        instructions: instructions.trim(),
-        style,
-        reference_template: useReference && selected ? selected : null,
-      })
-      setContent(res.content)
-      setShowAi(false)
-      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-      setSaveName(`email_template_ai_${stamp}.html`)
-      setSaveLabel(`AI ${STYLES.find((s) => s.value === style)?.label || 'Custom'}`)
-      setMsg('Draft ready — review the preview, then save under a new name.')
-    } catch (e: any) {
-      setError(e.message || 'Generate failed')
-      setMsg('')
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const save = async () => {
     const name = (saveName.trim() || selected || slugify(saveLabel || 'custom')).replace(/\s+/g, '_')
     const finalName = name.endsWith('.html') ? name : `${name}.html`
@@ -183,67 +147,17 @@ export function TemplatesPage() {
       <div className="page-hero">
         <div>
           <h1>Email Design</h1>
-          <p>Preview how customers see the email — pick a template or draft one with AI.</p>
+          <p>Preview how customers see the email — pick a saved template or create a new one with AI.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn secondary" type="button" disabled={busy} onClick={() => setShowAi((v) => !v)}>
-            {showAi ? 'Hide AI create' : 'AI create template'}
-          </button>
+          <Link to="/admin/templates/create" className="btn secondary">
+            Create with AI
+          </Link>
           <button className="btn" type="button" disabled={busy} onClick={save}>
             Save template
           </button>
         </div>
       </div>
-
-      {showAi ? (
-        <div className="panel tint-cyan stack" style={{ marginBottom: '1rem' }}>
-          <strong style={{ fontFamily: 'var(--display)' }}>Create with AI</strong>
-          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            Describe the layout and tone. AI returns a full Jinja HTML template using Starlight variables —
-            then preview and save it as a custom design.
-          </p>
-          <label className="field">
-            <span>Instructions</span>
-            <textarea
-              className="textarea"
-              rows={3}
-              value={instructions}
-              disabled={busy}
-              onChange={(e) => setInstructions(e.target.value)}
-              placeholder="e.g. Dark header with lime accent, product cards for feature_highlights, soft CTA…"
-            />
-          </label>
-          <div className="grid-2" style={{ gap: '0.75rem' }}>
-            <label className="field">
-              <span>Style</span>
-              <select className="select" value={style} disabled={busy} onChange={(e) => setStyle(e.target.value)}>
-                {STYLES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="toggle-row" style={{ alignSelf: 'end' }}>
-              <input
-                type="checkbox"
-                checked={useReference}
-                disabled={busy || !selected}
-                onChange={(e) => setUseReference(e.target.checked)}
-              />
-              <span>
-                <strong>Use current as reference</strong>
-                <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                  Borrow structure from {current ? displayLabel(current) : 'the selected template'}.
-                </span>
-              </span>
-            </label>
-          </div>
-          <button className="btn" type="button" disabled={busy} onClick={generate}>
-            {busy ? 'Generating…' : 'Generate template'}
-          </button>
-        </div>
-      ) : null}
 
       <div className="design-body">
         <div className="design-mail">
