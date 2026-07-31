@@ -1,59 +1,117 @@
 """
 Blob Storage manager for Starlight catalogue page images.
 
-Supports three backends — pick whichever suits your setup:
+Catalogue images are stored on the VPS only under:
+  AI-CRM-Mailer/static/page_images/<slug>/page_NNN.png
 
-  LOCAL (default for localhost dev)
-    Images saved to  AI-CRM-Mailer/static/page_images/
-    URLs returned as http://localhost:8000/page_images/...
-    Start the static server once with:
-        python -m http.server 8000 --directory static
-    Set in .env:  BLOB_BACKEND=local   (or leave blank — local is default)
-    Optionally:   STATIC_SERVER_URL=http://localhost:8000  (default shown)
+They are served by the FastAPI app at:
+  {PUBLIC_API_URL}/media/page_images/<slug>/page_NNN.png
 
-  CLOUDINARY (free tier — best for production emails with public URLs)
-    25 GB storage + 25 GB bandwidth / month free.
-    Sign up at https://cloudinary.com  → copy your CLOUDINARY_URL from Dashboard.
-    Set in .env:  BLOB_BACKEND=cloudinary
-                  CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME
-    Install:      pip install cloudinary
+Env:
+  STATIC_SERVER_URL  — preferred public base ending in /media
+                       e.g. https://api.mailer.starlightlinearled.com/media
+  PUBLIC_API_URL     — fallback API origin ( /media is appended )
+  BLOB_BACKEND       — ignored for catalogues (always local/VPS)
 
-  AZURE (original — if you do have an Azure Storage account)
-    Set in .env:  BLOB_BACKEND=azure
-                  AZURE_STORAGE_CONNECTION_STRING=...
-                  AZURE_STORAGE_CONTAINER=starlight-catalogues
-    Install:      pip install azure-storage-blob
+Legacy Cloudinary/Azure backends are disabled; catalogues stay on the VPS.
 """
-import os
+from __future__ import annotations
+
 import logging
+import os
+import re
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
 log = logging.getLogger("azure_blob")
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 BLOB_BACKEND = os.getenv("BLOB_BACKEND", "local").lower().strip()
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static", "page_images")
-STATIC_SERVER_URL = os.getenv("STATIC_SERVER_URL", "http://localhost:8000").rstrip("/")
-CONTAINER_DEFAULT = os.getenv("AZURE_STORAGE_CONTAINER", "starlight-catalogues")
+_DEFAULT_API = "http://127.0.0.1:7860"
 
 
-# ===========================================================================
-# Local file-system backend
-# ===========================================================================
+def media_base_url() -> str:
+    """
+    Public base URL for FastAPI StaticFiles mount at /media.
+    Accepts either a full .../media URL or an API origin.
+    """
+    raw = (
+        os.getenv("STATIC_SERVER_URL", "").strip()
+        or os.getenv("PUBLIC_API_URL", "").strip()
+        or _DEFAULT_API
+    ).rstrip("/")
+    if raw.endswith("/media"):
+        return raw
+    return f"{raw}/media"
+
+
+def page_image_public_url(catalogue_slug: str, page_number: int | str) -> str:
+    """Canonical public URL for a catalogue page image on this VPS."""
+    slug = str(catalogue_slug or "").strip().strip("/")
+    try:
+        page = int(page_number)
+    except (TypeError, ValueError):
+        page = 0
+    filename = f"page_{page:03d}.png"
+    return f"{media_base_url()}/page_images/{slug}/{filename}"
+
+
+def page_image_local_path(catalogue_slug: str, page_number: int | str) -> str:
+    try:
+        page = int(page_number)
+    except (TypeError, ValueError):
+        page = 0
+    return os.path.join(
+        STATIC_DIR,
+        str(catalogue_slug).strip().strip("/"),
+        f"page_{page:03d}.png",
+    )
+
+
+_PAGE_RE = re.compile(
+    r"(?:/media)?/page_images/(?P<slug>[^/]+)/page_(?P<page>\d+)\.png",
+    re.IGNORECASE,
+)
+
+
+def resolve_blob_url(
+    blob_url: str | None,
+    *,
+    catalogue_slug: str = "",
+    page_number: int | str = 0,
+) -> str:
+    """
+    Map any stored blob_url (localhost, Cloudinary, Azure, stale host) onto the
+    current VPS /media URL when we know catalogue_slug + page_number.
+    """
+    slug = (catalogue_slug or "").strip()
+    try:
+        page = int(page_number or 0)
+    except (TypeError, ValueError):
+        page = 0
+
+    if slug and page > 0:
+        return page_image_public_url(slug, page)
+
+    raw = (blob_url or "").strip()
+    if not raw or raw.startswith("["):
+        return ""
+
+    match = _PAGE_RE.search(raw.replace("\\", "/"))
+    if match:
+        return page_image_public_url(match.group("slug"), match.group("page"))
+
+    if "/page_images/" in raw:
+        tail = raw.split("/page_images/", 1)[1]
+        return f"{media_base_url()}/page_images/{tail.lstrip('/')}"
+
+    return raw
+
 
 class _LocalBlobManager:
-    """
-    Saves page images to  static/page_images/<slug>/page_NNN.png
-    Returns  http://localhost:8000/page_images/<slug>/page_NNN.png
-
-    Start the companion server in a separate terminal:
-        cd AI-CRM-Mailer
-        python -m http.server 8000 --directory static
-    """
+    """Saves page images under static/page_images/ and returns public /media URLs."""
 
     def upload_page_image(
         self,
@@ -70,143 +128,23 @@ class _LocalBlobManager:
         with open(filepath, "wb") as f:
             f.write(image_bytes)
 
-        url = f"{STATIC_SERVER_URL}/page_images/{catalogue_slug}/{filename}"
-        log.debug("Saved locally: %s → %s", filepath, url)
+        url = page_image_public_url(catalogue_slug, page_number)
+        log.info("Saved catalogue page image: %s → %s", filepath, url)
         return url
 
-
-# ===========================================================================
-# Cloudinary backend (free tier — public URLs, no server needed)
-# ===========================================================================
-
-class _CloudinaryBlobManager:
-    """
-    Uploads page images to Cloudinary and returns permanent public HTTPS URLs.
-    Free tier: 25 GB storage + 25 GB bandwidth / month.
-
-    pip install cloudinary
-    Set CLOUDINARY_URL=cloudinary://API_KEY:API_SECRET@CLOUD_NAME  in .env
-    """
-
-    def __init__(self) -> None:
-        try:
-            import cloudinary
-            import cloudinary.uploader
-            cloudinary.config(cloudinary_url=os.getenv("CLOUDINARY_URL", ""))
-            self._cloudinary = cloudinary
-        except ImportError:
-            raise ImportError(
-                "cloudinary package not installed. Run: pip install cloudinary"
-            )
-
-    def upload_page_image(
-        self,
-        image_bytes: bytes,
-        catalogue_slug: str,
-        page_number: int,
-        **_kwargs,
-    ) -> str:
-        import io
-        public_id = f"starlight/{catalogue_slug}/page_{page_number:03d}"
-        result = self._cloudinary.uploader.upload(
-            io.BytesIO(image_bytes),
-            public_id=public_id,
-            resource_type="image",
-            format="png",
-            overwrite=True,
-        )
-        url: str = result.get("secure_url", "")
-        log.debug("Cloudinary upload: %s", url)
-        return url
-
-
-# ===========================================================================
-# Azure Blob backend (original)
-# ===========================================================================
-
-class _AzureBlobManager:
-    """Original Azure Blob Storage backend."""
-
-    def __init__(self) -> None:
-        try:
-            from azure.storage.blob import BlobServiceClient, ContentSettings
-            self._BlobServiceClient = BlobServiceClient
-            self._ContentSettings = ContentSettings
-        except ImportError:
-            raise ImportError(
-                "azure-storage-blob not installed. Run: pip install azure-storage-blob"
-            )
-        self.connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
-        self.account_name = os.getenv("AZURE_STORAGE_ACCOUNT_NAME", "")
-        self.account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY", "")
-        self.container = CONTAINER_DEFAULT
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None:
-            if self.connection_string:
-                self._client = self._BlobServiceClient.from_connection_string(
-                    self.connection_string
-                )
-            else:
-                url = f"https://{self.account_name}.blob.core.windows.net"
-                self._client = self._BlobServiceClient(
-                    account_url=url, credential=self.account_key
-                )
-        return self._client
-
-    def _ensure_container(self):
-        cc = self._get_client().get_container_client(self.container)
-        try:
-            cc.get_container_properties()
-        except Exception:
-            cc.create_container(public_access="blob")
-
-    def upload_page_image(
-        self,
-        image_bytes: bytes,
-        catalogue_slug: str,
-        page_number: int,
-        **_kwargs,
-    ) -> str:
-        self._ensure_container()
-        blob_name = f"{catalogue_slug}/page_{page_number:03d}.png"
-        blob = self._get_client().get_blob_client(container=self.container, blob=blob_name)
-        blob.upload_blob(
-            image_bytes,
-            overwrite=True,
-            content_settings=self._ContentSettings(content_type="image/png"),
-        )
-        for part in self.connection_string.split(";"):
-            if part.startswith("AccountName="):
-                acct = part.split("=", 1)[1]
-                break
-        else:
-            acct = self.account_name
-        return f"https://{acct}.blob.core.windows.net/{self.container}/{blob_name}"
-
-
-# ===========================================================================
-# Factory — returns the right manager based on BLOB_BACKEND
-# ===========================================================================
 
 def _make_manager():
-    if BLOB_BACKEND == "cloudinary":
-        log.info("Blob backend: Cloudinary")
-        return _CloudinaryBlobManager()
-    if BLOB_BACKEND == "azure":
-        log.info("Blob backend: Azure Blob Storage")
-        return _AzureBlobManager()
-    # default
-    log.info("Blob backend: local  (static/page_images/)")
+    if BLOB_BACKEND in ("cloudinary", "azure"):
+        log.warning(
+            "BLOB_BACKEND=%s ignored — catalogue images are stored on the VPS only",
+            BLOB_BACKEND,
+        )
+    log.info("Blob backend: local VPS  (%s)  media=%s", STATIC_DIR, media_base_url())
     return _LocalBlobManager()
 
 
 class AzureBlobManager:
-    """
-    Public façade — wraps the active backend.
-    Import this class everywhere; swap backends via the BLOB_BACKEND env var.
-    """
+    """Public façade — catalogues always use the local VPS backend."""
 
     def __init__(self) -> None:
         self._backend = None
@@ -218,7 +156,7 @@ class AzureBlobManager:
 
     @property
     def available(self) -> bool:
-        return True  # local backend is always available
+        return True
 
     def upload_page_image(
         self,
@@ -235,7 +173,6 @@ class AzureBlobManager:
             )
         except Exception as exc:
             log.error("Blob upload failed (page %d): %s", page_number, exc)
-            # Absolute fallback: save locally even if the chosen backend fails
             try:
                 return _LocalBlobManager().upload_page_image(
                     image_bytes, catalogue_slug, page_number
@@ -244,5 +181,5 @@ class AzureBlobManager:
                 return f"[upload_failed]/{catalogue_slug}/page_{page_number:03d}.png"
 
 
-# Module-level singleton
 blob_manager = AzureBlobManager()
+Path(STATIC_DIR).mkdir(parents=True, exist_ok=True)

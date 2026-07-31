@@ -56,7 +56,9 @@ services:
       FRONTEND_URL: ${FRONTEND_URL:-https://mailer.starlightlinearled.com}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://mailer.starlightlinearled.com}
       DATABASE_URL: ${DATABASE_URL:-postgresql://starlight:${POSTGRES_PASSWORD}@starlight-mailer-db:5432/starlight}
+      BLOB_BACKEND: local
       STATIC_SERVER_URL: ${STATIC_SERVER_URL:-https://api.mailer.starlightlinearled.com/media}
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-https://api.mailer.starlightlinearled.com}
     volumes:
       - mailer_data:/app/data
       - mailer_attachments:/app/static/attachments

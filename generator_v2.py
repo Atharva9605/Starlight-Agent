@@ -69,6 +69,17 @@ def _build_rag_results(
         cat_name = meta.get("catalogue_name", "Starlight Catalogue")
         prod_name = meta.get("product_name", "")
         blob_url = meta.get("blob_url", "")
+        slug = meta.get("catalogue_slug", "") or ""
+        try:
+            from azure_blob import resolve_blob_url
+
+            blob_url = resolve_blob_url(
+                blob_url,
+                catalogue_slug=slug,
+                page_number=page_num,
+            )
+        except Exception:
+            pass
 
         ref_label = f"[{cat_name} — Page {page_num}]" if page_num else f"[{cat_name}]"
         context_parts.append(f"{ref_label}\n{doc}")
@@ -368,10 +379,10 @@ def generate_creative_draft(rec: dict) -> tuple[str, list[str], list[dict], dict
                 {
                     "role": "user",
                     "content": (
-                        "Your previous response failed schema validation. "
-                        "Return ONLY a valid JSON object with keys: "
-                        "subject, preamble, opening_line, intro, "
-                        "feature_highlights, use_cases, cta."
+                        "Your previous response failed schema validation or had empty copy. "
+                        "Return ONLY a valid JSON object with non-empty strings for: "
+                        "subject, preamble, opening_line, intro, cta, and non-empty arrays for "
+                        "feature_highlights and use_cases (at least 2 items each)."
                     ),
                 }
             ]
@@ -381,11 +392,6 @@ def generate_creative_draft(rec: dict) -> tuple[str, list[str], list[dict], dict
 
         draft = parse_with_retry(OutboundDraft, raw, retry_fn=_retry)
         return draft.model_dump_json(), raw_docs, product_refs, rag_trace
-
-
-# ---------------------------------------------------------------------------
-# List cleaners (Pass 2 removed - Pass 1 JSON mode is sufficient)
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +432,20 @@ def ensure_list(val) -> list:
         items = [v.strip() for v in val.splitlines() if v.strip()]
         return [clean_item(x) for x in items] if items else [clean_item(val)]
     return []
+
+
+def _pick_text(val, default: str) -> str:
+    """Use model text when non-empty; otherwise fall back (empty string ≠ missing key)."""
+    if val is None:
+        return default
+    text = str(val).strip()
+    return text if text else default
+
+
+def _pick_list(val, default: list[str]) -> list[str]:
+    items = ensure_list(val if val is not None else [])
+    cleaned = [x for x in items if x]
+    return cleaned if cleaned else list(default)
 
 
 # ---------------------------------------------------------------------------
@@ -479,17 +499,45 @@ def generate_eml_from_record(
         )
         subject = fallback.format(company_name=company_name)
 
-    preamble         = parsed.get("preamble",  "Precision-engineered LED solutions, delivered on time.")
-    opening_line     = parsed.get("opening_line", "Hope this email finds you well.")
-    intro            = parsed.get("intro", "").replace("\n", "<br>")
-    feature_highlights = ensure_list(parsed.get("feature_highlights", []))
-    use_cases        = ensure_list(parsed.get("use_cases", []))
-    technical_specs  = []
-    bullets          = []
-    cta              = parsed.get(
-        "cta",
-        "Would you be available for a brief call next week to explore how we can "
-        "illuminate your next project?",
+    preamble = _pick_text(
+        parsed.get("preamble"),
+        "Precision-engineered LED solutions, delivered on time.",
+    )
+    opening_line = _pick_text(
+        parsed.get("opening_line"),
+        "Hope this email finds you well.",
+    )
+    intro = _pick_text(
+        parsed.get("intro"),
+        (
+            "We noticed your recent work and wanted to share a few Starlight linear LED "
+            "options that tend to fit hospitality and commercial interiors."
+        ),
+    ).replace("\n", "<br>")
+    feature_highlights = _pick_list(
+        parsed.get("feature_highlights"),
+        [
+            "High-CRI linear LED for clean architectural lines",
+            "Custom lengths with seamless joins for continuous runs",
+            "Reliable lead times suited to project schedules",
+        ],
+    )
+    use_cases = _pick_list(
+        parsed.get("use_cases"),
+        [
+            "Hospitality corridors and lobbies",
+            "Retail feature walls and display lighting",
+            "Residential cove and profile accents",
+        ],
+    )
+    technical_specs = []
+    bullets = []
+    cta = _pick_text(
+        parsed.get("cta"),
+        (
+            "Would you be available for a brief call next week to explore how we can "
+            "illuminate your next project?"
+        ),
     )
 
     # Render template
