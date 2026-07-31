@@ -70,7 +70,7 @@ export function UsersPage() {
   const list = members.data?.members || []
 
   return (
-    <div>
+    <div className="studio-screen">
       <div className="page-hero">
         <div>
           <h1>Users</h1>
@@ -79,41 +79,49 @@ export function UsersPage() {
         <span className="pill">{list.length} {list.length === 1 ? 'user' : 'users'}</span>
       </div>
 
-      <div className="review-grid">
-        <div className="panel stack">
-          <strong style={{ fontFamily: 'var(--display)' }}>Team</strong>
+      <div className="studio-body">
+        <aside className="studio-nav panel stack">
+          <div className="studio-nav-label muted">Team</div>
           {members.isLoading ? <div className="muted">Loading…</div> : null}
           {members.isError ? (
             <div className="alert danger">{(members.error as Error).message}</div>
           ) : null}
           {!members.isLoading && list.length === 0 ? (
-            <div className="muted">No members yet.</div>
+            <div className="empty-state" style={{ padding: '1rem 0.25rem' }}>
+              <strong>No members yet</strong>
+              <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: 13 }}>
+                Add someone with the form on the right.
+              </p>
+            </div>
           ) : null}
-          <div className="stack" style={{ gap: 6 }}>
+          <div className="studio-nav-list">
             {list.map((m: OrgMember) => {
               const initial = (m.name || m.email).trim().charAt(0).toUpperCase()
               return (
-                <div key={m.id} className="list-row" style={{ alignItems: 'center' }}>
-                  <div className="avatar" style={{ width: 36, height: 36, fontSize: 14 }}>
+                <div key={m.id} className="list-row" style={{ alignItems: 'center', padding: '0.55rem 0.45rem' }}>
+                  <div className="avatar" style={{ width: 34, height: 34, fontSize: 13 }}>
                     {initial}
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontWeight: 700 }}>{m.name || m.email}</div>
-                    <div className="muted" style={{ fontSize: 13 }}>{m.email}</div>
+                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>{m.name || m.email}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>{m.email}</div>
                   </div>
                   <span className={`pill ${rolePill(m.role)}`}>{m.role}</span>
                 </div>
               )
             })}
           </div>
-        </div>
+        </aside>
 
-        <form className="panel stack" onSubmit={onSubmit}>
-          <div>
-            <strong style={{ fontFamily: 'var(--display)' }}>Add a user</strong>
-            <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-              They can sign in immediately with the password you set. Share it out of band.
-            </p>
+        <form className="studio-editor panel stack" onSubmit={onSubmit}>
+          <div className="studio-editor-head">
+            <div>
+              <h2>Add a user</h2>
+              <p>They can sign in immediately with the password you set. Share it out of band.</p>
+            </div>
+            <button className="btn" type="submit" disabled={add.isPending}>
+              {add.isPending ? 'Adding…' : 'Add user'}
+            </button>
           </div>
 
           <label className="field">
@@ -164,14 +172,14 @@ export function UsersPage() {
                 <button
                   key={opt.value}
                   type="button"
-                  className={`template-card${role === opt.value ? ' selected' : ''}`}
+                  className={`role-option${role === opt.value ? ' selected' : ''}`}
                   onClick={() => setRole(opt.value)}
                 >
-                  <span className="template-copy">
+                  <span>
                     <strong>{opt.label}</strong>
-                    <span className="muted">{opt.blurb}</span>
+                    <span className="muted" style={{ display: 'block' }}>{opt.blurb}</span>
                   </span>
-                  <span className="template-check">{role === opt.value ? '✓' : ''}</span>
+                  <span className="role-check">{role === opt.value ? '✓' : ''}</span>
                 </button>
               ))}
             </div>
@@ -180,10 +188,6 @@ export function UsersPage() {
           {formMsg ? (
             <div className={`alert ${add.isError ? 'danger' : 'warn'}`}>{formMsg}</div>
           ) : null}
-
-          <button className="btn" type="submit" disabled={add.isPending}>
-            {add.isPending ? 'Adding…' : 'Add user'}
-          </button>
         </form>
       </div>
     </div>

@@ -12,6 +12,7 @@ function statusPill(c: any) {
 export function InboxPage() {
   const [syncing, setSyncing] = useState(false)
   const [msg, setMsg] = useState('')
+  const [error, setError] = useState('')
   const q = useQuery({
     queryKey: ['conversations'],
     queryFn: () => api.conversations(true),
@@ -20,39 +21,50 @@ export function InboxPage() {
   const sync = async () => {
     setSyncing(true)
     setMsg('')
+    setError('')
     try {
       const res: any = await api.gmailSync()
       setMsg(`Synced · ${res.processed ?? 0} new`)
       await q.refetch()
     } catch (e: any) {
-      setMsg(e.message)
+      setError(e.message)
     } finally {
       setSyncing(false)
     }
   }
 
   const conversations = q.data?.conversations || []
+  const needsReview = conversations.filter((c: any) => c.has_draft || c.pending_draft).length
 
   return (
-    <div>
+    <div className="inbox-screen">
       <div className="page-hero">
         <div>
           <h1>Inbox</h1>
           <p>Client threads with Starlight AI drafts ready for approval.</p>
         </div>
-        <button className="btn" onClick={sync} disabled={syncing}>
-          {syncing ? 'Syncing…' : 'Sync Gmail'}
-        </button>
+        <div className="row">
+          {msg ? <span className="pill ok">{msg}</span> : null}
+          {needsReview ? <span className="pill warn">{needsReview} need review</span> : null}
+          <button className="btn" type="button" onClick={sync} disabled={syncing}>
+            {syncing ? 'Syncing…' : 'Sync Gmail'}
+          </button>
+        </div>
       </div>
 
-      {msg ? <div className="pill ok" style={{ marginBottom: 12 }}>{msg}</div> : null}
+      {error ? (
+        <div className="alert danger">
+          <strong>Sync failed</strong>
+          <div style={{ marginTop: 4 }}>{error}</div>
+        </div>
+      ) : null}
 
-      <div className="panel tint-blue stack">
-        {q.isLoading ? <div className="muted">Loading mailbox…</div> : null}
+      <div className="panel tint-blue inbox-list">
+        {q.isLoading ? <div className="muted" style={{ padding: '1rem' }}>Loading mailbox…</div> : null}
+
         {!q.isLoading && conversations.length === 0 ? (
-          <div className="stack" style={{ padding: '1.5rem 0.5rem', textAlign: 'center' }}>
-            <div style={{ fontSize: 40 }}>💡</div>
-            <strong>No client threads yet</strong>
+          <div className="empty-state stack" style={{ textAlign: 'center' }}>
+            <strong style={{ fontFamily: 'var(--display)' }}>No client threads yet</strong>
             <p className="muted" style={{ margin: 0 }}>
               Connect Gmail, run a campaign, then replies land here with AI drafts.
             </p>
@@ -62,6 +74,7 @@ export function InboxPage() {
             </div>
           </div>
         ) : null}
+
         {conversations.map((c: any) => {
           const company = c.client?.company || c.client?.email || c.client_email || 'Client'
           const initial = String(company).trim().charAt(0).toUpperCase()

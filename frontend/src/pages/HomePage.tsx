@@ -20,6 +20,10 @@ export function HomePage() {
           <h1>Hi {me?.name?.split(' ')[0] || 'there'}</h1>
           <p>Starlight AI Mailer — review replies, run outreach, keep catalogues grounded.</p>
         </div>
+        <div className="row">
+          <Link to="/inbox" className="btn secondary">Open inbox</Link>
+          <Link to="/campaigns" className="btn">New campaign</Link>
+        </div>
       </div>
 
       <div className="stat-row">
@@ -29,7 +33,7 @@ export function HomePage() {
         </div>
         <div className="stat amber">
           <div className="label">Needs attention</div>
-          <div className="value">{pending || Math.min(conversations.length, 3)}</div>
+          <div className="value">{pending}</div>
         </div>
         <div className="stat cyan">
           <div className="label">Catalogue chunks</div>
@@ -37,7 +41,7 @@ export function HomePage() {
         </div>
       </div>
 
-      <div className="home-cta" style={{ marginBottom: '1.25rem' }}>
+      <div className="home-cta">
         <Link to="/inbox">
           <h3>Review inbox</h3>
           <p className="muted" style={{ margin: 0 }}>Approve AI drafts before they leave as Starlight.</p>
@@ -46,13 +50,10 @@ export function HomePage() {
           <h3>New campaign</h3>
           <p className="muted" style={{ margin: 0 }}>Upload leads and stream personalized outreach.</p>
         </Link>
-      </div>
-
-      <div className="panel tint-blue">
-        <strong style={{ fontFamily: 'var(--display)' }}>Quick tip</strong>
-        <p className="muted" style={{ margin: '0.5rem 0 0' }}>
-          You always see the email as the customer will — never HTML source. Template code lives under Admin → Email Design.
-        </p>
+        <Link to="/catalogues">
+          <h3>Catalogues</h3>
+          <p className="muted" style={{ margin: 0 }}>Keep product PDFs indexed so emails stay grounded.</p>
+        </Link>
       </div>
     </div>
   )

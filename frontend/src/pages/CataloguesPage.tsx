@@ -29,8 +29,6 @@ export function CataloguesPage() {
       const { job_id } = await api.uploadCatalogues(files)
       setMsg('Reading catalogue… scanned PDFs take a few minutes.')
 
-      // Ingestion runs server-side; poll so a slow catalogue can't time the
-      // request out, and so progress is visible while it works.
       for (;;) {
         await new Promise((r) => setTimeout(r, POLL_MS))
         if (cancelled.current) return
@@ -57,26 +55,29 @@ export function CataloguesPage() {
   const catalogues = kb.data?.catalogues || []
 
   return (
-    <div>
+    <div className="studio-screen">
       <div className="page-hero">
         <div>
           <h1>Catalogues</h1>
           <p>Upload Starlight product PDFs that ground every outbound email.</p>
         </div>
-        <button
-          className="btn danger"
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            await api.clearKb()
-            setFileResults([])
-            setError('')
-            setMsg('Cleared')
-            kb.refetch()
-          }}
-        >
-          Clear all
-        </button>
+        <div className="row">
+          <Link to="/admin/rag" className="btn secondary">RAG Lab</Link>
+          <button
+            className="btn danger"
+            type="button"
+            disabled={busy || !catalogues.length}
+            onClick={async () => {
+              await api.clearKb()
+              setFileResults([])
+              setError('')
+              setMsg('Cleared')
+              kb.refetch()
+            }}
+          >
+            Clear all
+          </button>
+        </div>
       </div>
 
       <div className="stat-row">
@@ -85,73 +86,77 @@ export function CataloguesPage() {
         <div className="stat amber"><div className="label">Status</div><div className="value" style={{ fontSize: '1rem', marginTop: 8 }}>{busy ? 'Working…' : msg || 'Ready'}</div></div>
       </div>
 
-      <div className="panel tint-cyan stack" style={{ marginBottom: '1rem' }}>
-        <strong style={{ fontFamily: 'var(--display)' }}>Upload catalogues</strong>
-        <Dropzone
-          accept=".pdf,.txt,.docx"
-          multiple
-          busy={busy}
-          title="Drop PDF catalogues here"
-          hint="or click to choose files · PDF, TXT, DOCX"
-          onFiles={upload}
-        />
+      <div className="setup-grid">
+        <div className="panel tint-cyan stack">
+          <strong style={{ fontFamily: 'var(--display)' }}>Upload</strong>
+          <Dropzone
+            accept=".pdf,.txt,.docx"
+            multiple
+            busy={busy}
+            title="Drop PDF catalogues here"
+            hint="or click to choose files · PDF, TXT, DOCX"
+            onFiles={upload}
+          />
 
-        {busy ? (
-          <div className="stack" style={{ gap: 6 }}>
-            <div className="progress">
-              <div
-                className="progress-fill animated"
-                style={{ width: `${Math.max(3, Math.round(progress * 100))}%` }}
-              />
+          {busy ? (
+            <div className="stack" style={{ gap: 6 }}>
+              <div className="progress">
+                <div
+                  className="progress-fill animated"
+                  style={{ width: `${Math.max(3, Math.round(progress * 100))}%` }}
+                />
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {msg} · {Math.round(progress * 100)}%
+              </div>
             </div>
-            <div className="muted" style={{ fontSize: 12 }}>
-              {msg} · {Math.round(progress * 100)}%
+          ) : null}
+
+          {error ? (
+            <div className="alert danger">
+              <strong>Could not index that catalogue.</strong>
+              <div style={{ marginTop: 4 }}>{error}</div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {error ? (
-          <div className="alert danger">
-            <strong>Could not index that catalogue.</strong>
-            <div style={{ marginTop: 4 }}>{error}</div>
-          </div>
-        ) : null}
-
-        {fileResults.length ? (
-          <div className="stack" style={{ gap: 6 }}>
-            {fileResults.map((r) => (
-              <div key={r.filename} className="list-row">
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontWeight: 700 }}>{r.filename}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{r.message}</div>
+          {fileResults.length ? (
+            <div className="stack" style={{ gap: 6 }}>
+              {fileResults.map((r) => (
+                <div key={r.filename} className="list-row">
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{r.filename}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>{r.message}</div>
+                  </div>
+                  <span className={`pill ${r.success ? 'ok' : 'pink'}`}>
+                    {r.success ? 'Indexed' : 'Failed'}
+                  </span>
                 </div>
-                <span className={`pill ${r.success ? 'ok' : 'pink'}`}>
-                  {r.success ? 'Indexed' : 'Failed'}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : null}
+              ))}
+            </div>
+          ) : null}
+        </div>
 
-        {!catalogues.length && !fileResults.length ? (
-          <div className="muted">No catalogues yet — upload a PDF to get started.</div>
-        ) : (
-          <div className="stack">
-            {catalogues.map((name: string) => (
-              <div key={name} className="list-row">
-                <span style={{ fontWeight: 700 }}>{name}</span>
-                <span className="pill ok">Indexed</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="panel">
-        <p className="muted" style={{ margin: 0 }}>
-          Need to test retrieval quality? Open{' '}
-          <Link to="/admin/rag" style={{ color: 'var(--blue)', fontWeight: 700 }}>Admin → RAG Lab</Link>.
-        </p>
+        <div className="panel stack">
+          <strong style={{ fontFamily: 'var(--display)' }}>Library</strong>
+          {!catalogues.length && !fileResults.length ? (
+            <div className="empty-state" style={{ padding: '1.5rem 0.5rem' }}>
+              <strong>No catalogues yet</strong>
+              <p className="muted" style={{ margin: '0.4rem 0 0' }}>Upload a PDF to get started.</p>
+            </div>
+          ) : (
+            <div className="stack" style={{ gap: 6 }}>
+              {catalogues.map((name: string) => (
+                <div key={name} className="list-row">
+                  <span style={{ fontWeight: 700 }}>{name}</span>
+                  <span className="pill ok">Indexed</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            Test retrieval quality in Admin → RAG Lab.
+          </p>
+        </div>
       </div>
     </div>
   )

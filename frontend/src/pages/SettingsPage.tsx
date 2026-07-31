@@ -1,7 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 
+const SENDER_FIELDS: { key: string; label: string; placeholder?: string }[] = [
+  { key: 'sender_name', label: 'Name', placeholder: 'Vivek Dhondarkar' },
+  { key: 'sender_company', label: 'Company', placeholder: 'Starlight Linear LED' },
+  { key: 'sender_email', label: 'Email', placeholder: 'you@starlightlinearled.com' },
+  { key: 'sender_phone', label: 'Phone' },
+  { key: 'sender_website', label: 'Website', placeholder: 'www.starlightlinearled.com' },
+  { key: 'company_logo_url', label: 'Logo URL' },
+]
+
 export function SettingsPage() {
+  const [section, setSection] = useState<'identity' | 'gmail'>('identity')
   const [sender, setSender] = useState<Record<string, string>>({
     sender_name: 'Vivek Dhondarkar',
     sender_company: 'Starlight Linear LED',
@@ -18,6 +28,7 @@ export function SettingsPage() {
   }>({ connected: false })
   const [msg, setMsg] = useState('')
   const [gmailNotice, setGmailNotice] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     Promise.all([api.sender(), api.gmailStatus().catch(() => ({ connected: false }))])
@@ -30,16 +41,21 @@ export function SettingsPage() {
 
   const saveSender = async (e: FormEvent) => {
     e.preventDefault()
-    await api.updateSender(sender)
-    setMsg('Starlight sender saved')
+    setSaving(true)
+    try {
+      await api.updateSender(sender)
+      setMsg('Starlight sender saved')
+    } catch (err: any) {
+      setMsg(err.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const connectGmail = async () => {
     setGmailNotice('')
     try {
       const res = await api.gmailAuthorize()
-      // Without Google OAuth credentials the API returns url: null, and
-      // assigning that to location sends the browser to /null.
       if (!res?.url) {
         setGmailNotice(res?.message || 'Google OAuth is not configured on this server.')
         return
@@ -51,65 +67,123 @@ export function SettingsPage() {
   }
 
   return (
-    <div>
+    <div className="studio-screen">
       <div className="page-hero">
         <div>
           <h1>Settings</h1>
-          <p>Starlight identity, sender details, and Gmail — this workspace is for Starlight Linear LED only.</p>
+          <p>Sender identity and Gmail for this Starlight workspace.</p>
         </div>
         {msg ? <span className="pill ok">{msg}</span> : null}
       </div>
 
-      <div className="panel tint-blue stack" style={{ marginBottom: '1rem' }}>
-        <strong style={{ fontFamily: 'var(--display)' }}>Product</strong>
-        <div className="row">
-          <div className="brand-mark">S</div>
-          <div>
-            <div style={{ fontWeight: 800, fontFamily: 'var(--display)', fontSize: '1.2rem' }}>Starlight Linear LED</div>
-            <div className="muted">Award-winning Indian LED lighting · AI Mailer CRM</div>
-          </div>
-        </div>
-      </div>
-
-      <form className="panel stack" onSubmit={saveSender} style={{ marginBottom: '1rem' }}>
-        <strong style={{ fontFamily: 'var(--display)' }}>Sender profile</strong>
-        {['sender_name', 'sender_company', 'sender_email', 'sender_phone', 'sender_website', 'company_logo_url'].map((k) => (
-          <input key={k} className="input" placeholder={k.replace(/_/g, ' ')} value={sender[k] || ''} onChange={(e) => setSender({ ...sender, [k]: e.target.value })} />
-        ))}
-        <button className="btn">Save sender</button>
-      </form>
-
-      <div className="panel tint-amber stack">
-        <strong style={{ fontFamily: 'var(--display)' }}>Gmail</strong>
-        <div className="muted">
-          {gmail.connected
-            ? `Connected as ${gmail.email}`
-            : gmail.message || 'Connect the Starlight Workspace inbox'}
-        </div>
-        {!gmail.connected && gmail.mode === 'platform' && gmail.email ? (
-          <div className="muted" style={{ fontSize: 13 }}>
-            Campaigns currently send as <strong>{gmail.email}</strong> using the shared Workspace
-            service account. Connecting Gmail is only needed to send from your own inbox.
-          </div>
-        ) : null}
-        <div className="row">
-          <button className="btn" type="button" onClick={connectGmail}>Connect Gmail</button>
-          {gmail.connected ? (
-            <button className="btn secondary" type="button" onClick={async () => { await api.gmailDisconnect(); setGmail({ connected: false }) }}>
-              Disconnect
+      <div className="studio-body">
+        <aside className="studio-nav panel stack">
+          <div className="studio-nav-label muted">Sections</div>
+          <div className="studio-nav-list">
+            <button
+              type="button"
+              className={`studio-nav-item is-link${section === 'identity' ? ' active' : ''}`}
+              onClick={() => setSection('identity')}
+            >
+              <span className="studio-nav-title">Identity</span>
+              <span className="studio-nav-key muted">Sender profile</span>
             </button>
-          ) : null}
-        </div>
-        {gmailNotice ? (
-          <div className="alert danger">
-            <strong>Gmail not connected</strong>
-            <div style={{ marginTop: 4 }}>{gmailNotice}</div>
-            <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-              Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and
-              GOOGLE_OAUTH_REDIRECT_URI on the server to enable per-user Gmail.
-            </div>
+            <button
+              type="button"
+              className={`studio-nav-item is-link${section === 'gmail' ? ' active' : ''}`}
+              onClick={() => setSection('gmail')}
+            >
+              <span className="studio-nav-title">Gmail</span>
+              <span className="studio-nav-key muted">
+                {gmail.connected ? gmail.email || 'Connected' : 'Not connected'}
+              </span>
+            </button>
           </div>
-        ) : null}
+        </aside>
+
+        {section === 'identity' ? (
+          <form className="studio-editor panel stack" onSubmit={saveSender}>
+            <div className="studio-editor-head">
+              <div>
+                <h2>Sender profile</h2>
+                <p>Appears on outbound Starlight emails.</p>
+              </div>
+              <button className="btn" type="submit" disabled={saving}>
+                {saving ? 'Saving…' : 'Save sender'}
+              </button>
+            </div>
+            {SENDER_FIELDS.map((f) => (
+              <label key={f.key} className="field">
+                <span>{f.label}</span>
+                <input
+                  className="input"
+                  placeholder={f.placeholder}
+                  value={sender[f.key] || ''}
+                  onChange={(e) => setSender({ ...sender, [f.key]: e.target.value })}
+                />
+              </label>
+            ))}
+          </form>
+        ) : (
+          <div className="studio-editor panel tint-amber stack">
+            <div className="studio-editor-head">
+              <div>
+                <h2>Gmail</h2>
+                <p>Connect the inbox used for sync and sending.</p>
+              </div>
+              <div className="row">
+                <button className="btn" type="button" onClick={connectGmail}>
+                  {gmail.connected ? 'Reconnect' : 'Connect Gmail'}
+                </button>
+                {gmail.connected ? (
+                  <button
+                    className="btn secondary"
+                    type="button"
+                    onClick={async () => {
+                      await api.gmailDisconnect()
+                      setGmail({ connected: false })
+                    }}
+                  >
+                    Disconnect
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="row">
+              <span className={`pill ${gmail.connected ? 'ok' : 'warn'}`}>
+                {gmail.connected ? 'Connected' : 'Not connected'}
+              </span>
+              {gmail.connected && gmail.email ? (
+                <span className="muted" style={{ fontSize: 13 }}>{gmail.email}</span>
+              ) : null}
+            </div>
+
+            {!gmail.connected ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                {gmail.message || 'Connect the Starlight Workspace inbox to sync replies.'}
+              </p>
+            ) : null}
+
+            {!gmail.connected && gmail.mode === 'platform' && gmail.email ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                Campaigns currently send as <strong>{gmail.email}</strong> using the shared Workspace
+                service account. Connecting Gmail is only needed to send from your own inbox.
+              </p>
+            ) : null}
+
+            {gmailNotice ? (
+              <div className="alert danger">
+                <strong>Gmail not connected</strong>
+                <div style={{ marginTop: 4 }}>{gmailNotice}</div>
+                <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
+                  Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and
+                  GOOGLE_OAUTH_REDIRECT_URI on the server to enable per-user Gmail.
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </div>
   )

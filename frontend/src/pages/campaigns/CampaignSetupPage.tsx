@@ -100,14 +100,29 @@ export function CampaignSetupPage() {
           <h1>Campaigns</h1>
           <p>Upload leads, choose a look, then review each email — or turn on autosend.</p>
         </div>
-        {inFlight ? (
+        <div className="row">
+          {inFlight ? (
+            <button
+              className="btn secondary"
+              type="button"
+              onClick={() => nav(autosend ? '/campaigns/live' : '/campaigns/review')}
+            >
+              Resume →
+            </button>
+          ) : null}
           <button
-            className="btn secondary"
-            onClick={() => nav(autosend ? '/campaigns/live' : '/campaigns/review')}
+            className="btn"
+            type="button"
+            disabled={!leads.length || launching || inFlight}
+            onClick={launch}
           >
-            Resume →
+            {launching
+              ? 'Starting…'
+              : autosend
+                ? `Autosend ${leads.length || ''} leads`
+                : `Generate & review ${leads.length || ''} leads`}
           </button>
-        ) : null}
+        </div>
       </div>
 
       <div className="setup-grid">
@@ -252,18 +267,25 @@ export function CampaignSetupPage() {
             ) : null}
           </div>
 
-          <button
-            className="btn"
-            style={{ width: '100%', padding: '0.95rem' }}
-            disabled={!leads.length || launching || inFlight}
-            onClick={launch}
-          >
-            {launching
-              ? 'Starting…'
-              : autosend
-                ? `🚀 Autosend ${leads.length || ''} leads`
-                : `▶ Generate & review ${leads.length || ''} leads`}
-          </button>
+          {leads.length ? (
+            <div className="setup-actions">
+              <span className="muted" style={{ marginRight: 'auto', fontSize: 13 }}>
+                {leads.length} lead{leads.length === 1 ? '' : 's'} ready
+              </span>
+              <button
+                className="btn"
+                type="button"
+                disabled={!leads.length || launching || inFlight}
+                onClick={launch}
+              >
+                {launching
+                  ? 'Starting…'
+                  : autosend
+                    ? `Autosend ${leads.length}`
+                    : `Generate & review ${leads.length}`}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

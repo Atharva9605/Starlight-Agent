@@ -96,76 +96,117 @@ export function ThreadPage() {
     },
   })
 
+  const busy = generate.isPending || save.isPending || approve.isPending || reject.isPending
+  const clientLabel = q.data?.client?.company || q.data?.client?.email || 'Client thread'
+
   return (
-    <div>
-      <div className="page-hero">
+    <div className="review-screen">
+      <header className="review-top">
         <div>
-          <Link to="/inbox" className="muted" style={{ fontWeight: 600, fontSize: 13 }}>← Inbox</Link>
-          <h1 style={{ marginTop: 6 }}>{q.data?.subject || 'Conversation'}</h1>
-          <p>{q.data?.client?.company || q.data?.client?.email || 'Client thread'}</p>
+          <Link to="/inbox" className="muted" style={{ fontWeight: 600, fontSize: 12, letterSpacing: '0.04em' }}>
+            ← INBOX
+          </Link>
+          <h1>{q.data?.subject || 'Conversation'}</h1>
+          <p className="muted" style={{ margin: '0.2rem 0 0' }}>{clientLabel}</p>
         </div>
-        <span className="pill pink">Human approve required</span>
-      </div>
-
-      <div className="grid-2 thread-layout">
-        <div className="panel stack">
-          <strong style={{ fontFamily: 'var(--display)' }}>Conversation</strong>
-          {timeline.length === 0 ? (
-            <div className="muted">No messages yet in this thread.</div>
-          ) : null}
-          {timeline.map((m: any) => (
-            <MessageBubble key={m.id} message={m} />
-          ))}
+        <div className="row">
+          {notice ? <span className="pill ok">{notice}</span> : null}
+          <span className="pill pink">Human approve required</span>
         </div>
+      </header>
 
-        <div className={`panel tint-amber stack ${generate.isPending ? 'is-generating' : ''}`}>
-          <strong style={{ fontFamily: 'var(--display)' }}>AI draft for customer</strong>
-          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-            Edit like email — you never need to touch HTML. Preview is exactly what the client gets.
-          </p>
-
-          <input
-            className="input"
-            placeholder="Refine with AI (tone, products, CTA…)"
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-          />
-          <button className="btn amber" onClick={() => generate.mutate()} disabled={generate.isPending}>
-            {generate.isPending ? 'Writing draft…' : draft ? 'Regenerate draft' : 'Generate draft'}
-          </button>
-
-          {draft ? (
-            <>
-              {draft.internal_note ? (
-                <div className="pill warn">Sales note: {draft.internal_note}</div>
-              ) : null}
-              <label className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Subject</label>
-              <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
-
-              <label className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Body</label>
-              <EmailComposer
-                key={composerKey}
-                html={bodyHtml}
-                onChange={(h, t) => {
-                  setBodyHtml(h)
-                  setBodyText(t)
-                }}
-              />
-
-              <label className="muted" style={{ fontSize: 12, fontWeight: 700 }}>Customer preview</label>
-              <EmailPreviewFrame html={bodyHtml} text={bodyText} subject={subject} />
-
-              <div className="row">
-                <button className="btn secondary" onClick={() => save.mutate()} disabled={save.isPending}>Save</button>
-                <button className="btn" onClick={() => approve.mutate()} disabled={approve.isPending}>Approve & send</button>
-                <button className="btn danger" onClick={() => reject.mutate()} disabled={reject.isPending}>Reject</button>
-              </div>
-            </>
+      <div className="review-body">
+        <div className="review-mail">
+          {draft && (bodyHtml || bodyText) ? (
+            <EmailPreviewFrame html={bodyHtml} text={bodyText} subject={subject} fullscreen />
           ) : (
-            <div className="muted">No draft yet — generate after a client reply.</div>
+            <div className="panel empty-state" style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
+              <div style={{ textAlign: 'center', maxWidth: 360 }}>
+                <strong style={{ fontFamily: 'var(--display)' }}>
+                  {generate.isPending ? 'Writing draft…' : 'No draft yet'}
+                </strong>
+                <p className="muted" style={{ margin: '0.5rem 0 0' }}>
+                  {generate.isPending
+                    ? 'Starlight is composing a reply for this thread.'
+                    : 'Generate a draft from the side panel after a client reply.'}
+                </p>
+              </div>
+            </div>
           )}
-          {notice ? <div className="pill ok">{notice}</div> : null}
         </div>
+
+        <aside className={`review-side${generate.isPending ? ' is-generating' : ''}`}>
+          <div className="review-queue stack" style={{ maxHeight: 200, overflow: 'auto' }}>
+            <strong style={{ fontFamily: 'var(--display)', fontSize: 14 }}>Timeline</strong>
+            {timeline.length === 0 ? (
+              <div className="muted" style={{ fontSize: 13 }}>No messages yet in this thread.</div>
+            ) : (
+              timeline.map((m: any) => <MessageBubble key={m.id} message={m} />)
+            )}
+          </div>
+
+          <div className="panel tint-amber stack" style={{ flex: 1 }}>
+            <div className="studio-editor-head">
+              <div>
+                <h2 style={{ fontSize: '1.05rem' }}>AI draft</h2>
+                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: 13 }}>
+                  Edit like email — preview is what the client gets.
+                </p>
+              </div>
+            </div>
+
+            <label className="field">
+              <span>Refine with AI</span>
+              <input
+                className="input"
+                placeholder="Tone, products, CTA…"
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+              />
+            </label>
+            <button className="btn amber" type="button" onClick={() => generate.mutate()} disabled={busy}>
+              {generate.isPending ? 'Writing draft…' : draft ? 'Regenerate draft' : 'Generate draft'}
+            </button>
+
+            {draft ? (
+              <>
+                {draft.internal_note ? (
+                  <div className="pill warn">Sales note: {draft.internal_note}</div>
+                ) : null}
+                <label className="field">
+                  <span>Subject</span>
+                  <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
+                </label>
+                <label className="field">
+                  <span>Body</span>
+                  <EmailComposer
+                    key={composerKey}
+                    html={bodyHtml}
+                    onChange={(h, t) => {
+                      setBodyHtml(h)
+                      setBodyText(t)
+                    }}
+                  />
+                </label>
+                <div className="row">
+                  <button className="btn secondary" type="button" onClick={() => save.mutate()} disabled={busy}>
+                    Save
+                  </button>
+                  <button className="btn" type="button" onClick={() => approve.mutate()} disabled={busy}>
+                    Approve & send
+                  </button>
+                  <button className="btn danger" type="button" onClick={() => reject.mutate()} disabled={busy}>
+                    Reject
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                No draft yet — generate after a client reply.
+              </p>
+            )}
+          </div>
+        </aside>
       </div>
     </div>
   )
