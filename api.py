@@ -820,6 +820,64 @@ async def download_emls():
     
     return FileResponse(zip_path, media_type='application/zip', filename="starlight_emls.zip")
 
+def _normalize_lead_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Map common Excel headers onto website / email / company."""
+    rename: dict = {}
+    for col in df.columns:
+        key = str(col).strip().lower().replace("-", "_").replace(" ", "_")
+        if key in ("website", "web_site", "url", "site", "website_url"):
+            rename[col] = "website"
+        elif key in ("email", "e_mail", "mail", "emails", "email_address", "contact_email"):
+            rename[col] = "email"
+        elif key in ("company", "company_name", "organisation", "organization", "org"):
+            rename[col] = "company"
+    if rename:
+        df = df.rename(columns=rename)
+    # Keep a single canonical column if duplicates appear after rename
+    return df.loc[:, ~df.columns.duplicated()]
+
+
+def _lead_email_from_row(lead: dict | None) -> str:
+    """Prefer an explicit email from the uploaded sheet when present."""
+    if not lead:
+        return ""
+    for key, val in lead.items():
+        if str(key).strip().lower() not in (
+            "email",
+            "emails",
+            "e_mail",
+            "mail",
+            "email_address",
+            "contact_email",
+        ):
+            continue
+        if val is None:
+            continue
+        text = str(val).strip()
+        if not text or text.lower() in ("nan", "none", "null"):
+            continue
+        first = text.split(",")[0].strip()
+        if "@" in first:
+            return first
+    return ""
+
+
+def _apply_recipient(scraped_data: dict, *, recipient_override: str | None = None, lead: dict | None = None) -> None:
+    """
+    Resolve who the email goes to:
+    1) global recipient_override (test sends)
+    2) email column on the lead row
+    3) otherwise leave scraped emails alone
+    """
+    override = (recipient_override or "").strip()
+    if override:
+        scraped_data["emails"] = override
+        return
+    lead_email = _lead_email_from_row(lead)
+    if lead_email:
+        scraped_data["emails"] = lead_email
+
+
 @app.post("/api/upload-leads")
 async def upload_leads(file: UploadFile = File(...)):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
@@ -827,7 +885,7 @@ async def upload_leads(file: UploadFile = File(...)):
         tmp_path = tmp.name
     
     try:
-        df = pd.read_excel(tmp_path)
+        df = _normalize_lead_dataframe(pd.read_excel(tmp_path))
         if "website" not in df.columns:
             return JSONResponse(status_code=400, content={"error": "Excel file must have a 'website' column."})
         
@@ -877,8 +935,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
     if not scraped_data:
         raise HTTPException(status_code=400, detail="Scraper failed for this website.")
 
-    if req.recipient_override:
-        scraped_data["emails"] = req.recipient_override
+    _apply_recipient(scraped_data, recipient_override=req.recipient_override, lead=req.lead)
     if req.lead.get("company"):
         scraped_data.setdefault("company", req.lead["company"])
     scraped_data["website"] = website
@@ -1053,8 +1110,11 @@ async def process_leads(req: ProcessRequest):
                 if not scraped_data:
                     raise Exception("Scraper failed to return data.")
                 
-                if req.recipient_override:
-                    scraped_data["emails"] = req.recipient_override
+                _apply_recipient(
+                    scraped_data,
+                    recipient_override=req.recipient_override,
+                    lead=row,
+                )
                 
                 yield f"data: {json.dumps({'type': 'log', 'message': f'Generating EML for: {website}'})}\n\n"
                 eml_path, trace_info = await run_in_thread(
