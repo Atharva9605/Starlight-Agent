@@ -239,7 +239,39 @@ def get_sender(organization_id: str | None = None) -> dict:
     return merged
 
 
+REQUIRED_DRAFT_JSON_KEYS = (
+    "subject",
+    "preamble",
+    "opening_line",
+    "intro",
+    "feature_highlights",
+    "use_cases",
+    "cta",
+)
+
+
+def validate_draft_system_prompt(content: str) -> None:
+    """
+    Keep Prompt Studio from reintroducing the empty-email bug:
+    draft_system must document the template JSON keys (not alternate schemas).
+    """
+    lower = (content or "").lower()
+    missing = [k for k in REQUIRED_DRAFT_JSON_KEYS if f'"{k}"' not in lower and f"'{k}'" not in lower and k not in lower]
+    # Require the critical body keys at minimum
+    critical = ["intro", "feature_highlights", "cta"]
+    missing_critical = [k for k in critical if k not in lower]
+    if missing_critical:
+        raise ValueError(
+            "Email Writing (System) must keep the template JSON keys "
+            f"({', '.join(REQUIRED_DRAFT_JSON_KEYS)}). "
+            f"Missing: {', '.join(missing_critical)}. "
+            "Do not switch to alternate keys like opening_observation / positioning_line / ask."
+        )
+
+
 def update_prompt(key: str, content: str, organization_id: str | None = None) -> dict:
+    if key == "draft_system":
+        validate_draft_system_prompt(content)
     config = get_config(organization_id=organization_id)
     if key not in config.get("prompts", {}) and key not in _load_defaults().get("prompts", {}):
         raise KeyError(f"Unknown prompt key: {key}")

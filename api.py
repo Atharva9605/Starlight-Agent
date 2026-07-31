@@ -365,7 +365,7 @@ class EmailPreviewRequest(BaseModel):
 
 class TemplateGenerateRequest(BaseModel):
     instructions: str
-    style: Optional[str] = "modern"
+    style: Optional[str] = None
     reference_template: Optional[str] = None
 
 
@@ -479,6 +479,8 @@ async def put_single_prompt(key: str, body: PromptUpdate):
         return {"status": "success", "key": key}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.put("/api/config/prompts")
@@ -488,6 +490,8 @@ async def put_bulk_prompts(body: PromptBulkUpdate):
             update_prompt(key, content)
         except KeyError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     return {"status": "success", "updated": list(body.prompts.keys())}
 
 

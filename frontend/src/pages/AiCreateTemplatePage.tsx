@@ -10,12 +10,6 @@ type TemplateMeta = {
   is_custom?: boolean
 }
 
-const STYLES = [
-  { value: 'modern', label: 'Modern Soft' },
-  { value: 'minimal', label: 'Minimalist' },
-  { value: 'bold', label: 'Bold & Vibrant' },
-]
-
 function displayLabel(t: TemplateMeta): string {
   if (t.label && t.label !== t.name) return t.label
   if (t.name.includes('minimalist')) return 'Minimalist'
@@ -37,17 +31,14 @@ export function AiCreateTemplatePage() {
   const [previewing, setPreviewing] = useState(false)
 
   const [instructions, setInstructions] = useState(
-    'Clean Starlight LED outreach email with logo header, short personalized intro, feature highlights, use cases, and a clear CTA. Keep it mobile-friendly.',
+    'Clean Starlight LED outreach email with logo header, short personalized intro, feature highlights, use cases, product catalogue cards, and a clear CTA. Keep it mobile-friendly. Invent a fresh layout — do not copy the stock Modern Soft / Minimalist / Bold shells.',
   )
-  const [style, setStyle] = useState('modern')
-  const [useReference, setUseReference] = useState(true)
   const [saveName, setSaveName] = useState('')
   const [saveLabel, setSaveLabel] = useState('')
 
   const loadTemplates = useCallback(async () => {
     const list = await api.templates()
     setTemplates(list)
-    setReference((prev) => prev || list[0]?.name || '')
     return list
   }, [])
 
@@ -91,13 +82,13 @@ export function AiCreateTemplatePage() {
     try {
       const res = await api.generateTemplate({
         instructions: instructions.trim(),
-        style,
-        reference_template: useReference && reference ? reference : null,
+        style: null,
+        reference_template: reference || null,
       })
       setContent(res.content)
       const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
       setSaveName(`email_template_ai_${stamp}.html`)
-      setSaveLabel(`AI ${STYLES.find((s) => s.value === style)?.label || 'Custom'}`)
+      setSaveLabel('AI Custom')
       setMsg('Draft ready — review the preview, then save.')
     } catch (e: any) {
       setError(e.message || 'Generate failed')
@@ -132,7 +123,7 @@ export function AiCreateTemplatePage() {
       <div className="page-hero">
         <div>
           <h1>Create with AI</h1>
-          <p>Describe the layout and tone — AI drafts a full Starlight email template you can preview and save.</p>
+          <p>Describe any layout you want — AI drafts a fresh Jinja HTML template. Old stock styles are optional inspiration only.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Link to="/admin/templates" className="btn secondary">
@@ -161,7 +152,7 @@ export function AiCreateTemplatePage() {
               <div style={{ textAlign: 'center', maxWidth: 360 }}>
                 <strong style={{ fontFamily: 'var(--display)' }}>No draft yet</strong>
                 <p className="muted" style={{ margin: '0.5rem 0 0' }}>
-                  Set instructions on the right and hit Generate to see a customer preview here.
+                  Describe the design on the right and hit Generate — no need to pick Modern Soft or any stock shell.
                 </p>
               </div>
             </div>
@@ -174,31 +165,22 @@ export function AiCreateTemplatePage() {
             <span>Instructions</span>
             <textarea
               className="textarea"
-              rows={5}
+              rows={7}
               value={instructions}
               disabled={busy}
               onChange={(e) => setInstructions(e.target.value)}
-              placeholder="e.g. Dark header with lime accent, product cards for feature_highlights, soft CTA…"
+              placeholder="Describe layout, colors, sections, tone… e.g. dark navy header, lime accents, product cards for referenced_products, soft CTA"
             />
           </label>
           <label className="field">
-            <span>Style</span>
-            <select className="select" value={style} disabled={busy} onChange={(e) => setStyle(e.target.value)}>
-              {STYLES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Reference template</span>
+            <span>Reference template (optional)</span>
             <select
               className="select"
               value={reference}
-              disabled={busy || !useReference}
+              disabled={busy}
               onChange={(e) => setReference(e.target.value)}
             >
+              <option value="">None — invent a new design</option>
               {templates.map((t) => (
                 <option key={t.name} value={t.name}>
                   {displayLabel(t)}
@@ -206,19 +188,10 @@ export function AiCreateTemplatePage() {
                 </option>
               ))}
             </select>
-          </label>
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={useReference}
-              disabled={busy || !reference}
-              onChange={(e) => setUseReference(e.target.checked)}
-            />
-            <span>
-              <strong>Use as reference</strong>
-              <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                Borrow structure from {refMeta ? displayLabel(refMeta) : 'the selected template'}.
-              </span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {reference
+                ? `May borrow structure from ${refMeta ? displayLabel(refMeta) : reference}, but should still feel original.`
+                : 'Leave as None so AI is not steered toward the old Modern Soft / Minimalist / Bold layouts.'}
             </span>
           </label>
           <button className="btn" type="button" disabled={busy} onClick={generate}>

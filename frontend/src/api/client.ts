@@ -186,7 +186,7 @@ export const api = {
     }),
   generateTemplate: (body: {
     instructions: string
-    style?: string
+    style?: string | null
     reference_template?: string | null
   }) =>
     request<{ content: string }>('/api/templates/generate', {
