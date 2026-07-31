@@ -40,7 +40,6 @@ export function TemplatesPage() {
   const [previewHtml, setPreviewHtml] = useState('')
   const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
-  const [showHtml, setShowHtml] = useState(false)
   const [showAi, setShowAi] = useState(false)
   const [busy, setBusy] = useState(false)
   const [previewing, setPreviewing] = useState(false)
@@ -124,7 +123,6 @@ export function TemplatesPage() {
         reference_template: useReference && selected ? selected : null,
       })
       setContent(res.content)
-      setShowHtml(true)
       setShowAi(false)
       const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
       setSaveName(`email_template_ai_${stamp}.html`)
@@ -302,38 +300,11 @@ export function TemplatesPage() {
         ) : null}
       </div>
 
-      <div className="grid-2">
-        <div className="panel tint-blue stack">
-          <strong style={{ fontFamily: 'var(--display)' }}>
-            Customer preview{previewing ? ' · refreshing…' : ''}
-          </strong>
-          <EmailPreviewFrame html={previewHtml || content} subject="Sample Starlight email" />
-        </div>
-        <div className="panel stack">
-          <button type="button" className="btn secondary" onClick={() => setShowHtml((v) => !v)}>
-            {showHtml ? 'Hide HTML source' : 'Advanced: Edit HTML'}
-          </button>
-          {showHtml ? (
-            <div className="advanced-box stack">
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                Keep Jinja variables like <code>{'{{ subject }}'}</code> and loops for{' '}
-                <code>feature_highlights</code> intact so campaigns can fill them.
-              </p>
-              <textarea
-                className="textarea"
-                rows={18}
-                value={content}
-                disabled={busy}
-                onChange={(e) => setContent(e.target.value)}
-              />
-            </div>
-          ) : (
-            <div className="muted">
-              Use <strong>AI create template</strong> for a new design, or open Advanced to tweak HTML.
-              Preview uses sample data so you see a realistic email, not raw Jinja.
-            </div>
-          )}
-        </div>
+      <div className="panel tint-blue stack">
+        <strong style={{ fontFamily: 'var(--display)' }}>
+          Customer preview{previewing ? ' · refreshing…' : ''}
+        </strong>
+        <EmailPreviewFrame html={previewHtml || content} subject="Sample Starlight email" />
       </div>
     </div>
   )
