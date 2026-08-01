@@ -21,7 +21,10 @@ _NON_PRODUCT_NAME = re.compile(
 )
 
 _NON_PRODUCT_CATEGORY = re.compile(
-    r"(certificate|certification|compliance|document|cover|index)",
+    r"("
+    r"certificate|certification|compliance|document|cover|index|"
+    r"fixed general purpose"
+    r")",
     re.I,
 )
 
