@@ -1565,12 +1565,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-size: 0.88rem;
   font-weight: 650;
   color: #1d4ed8;
+  overflow-wrap: anywhere;
 }
 .pc-desc {
   margin: 0;
   font-size: 0.86rem;
   color: var(--muted);
   line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .pc-specs {
   margin: 0.35rem 0 0;
@@ -1599,6 +1604,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   color: #0f172a;
   font-weight: 550;
   line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .pc-features {
   margin: 0.25rem 0 0;

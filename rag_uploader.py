@@ -118,73 +118,150 @@ def _ingest_text_pdf(
     source_name: str,
     progress_callback=None,
 ) -> tuple[bool, str]:
-    """Fallback: text-extraction pipeline for readable PDFs."""
+    """
+    Text-extraction pipeline for readable PDFs.
+
+    Still renders every page to a PNG so the digital catalogue has real
+    page images (diagrams / product art), not empty placeholders.
+    """
+    from azure_blob import blob_manager
+    from catalogue_ingestor import (
+        BLOB_IMAGE_MAX_W,
+        _catalogue_display_name,
+        _catalogue_slug,
+        _render_page,
+        _resize_png,
+    )
+
+    slug = _catalogue_slug(source_name)
+    display_name = _catalogue_display_name(source_name)
+
     doc = fitz.open(pdf_path)
-    pages = []
-    for i, page in enumerate(doc, start=1):
+    total_pages = len(doc)
+
+    all_chunks: list[str] = []
+    all_metas: list[dict] = []
+    all_ids: list[str] = []
+    blob_url_map: dict[int, str] = {}
+    pages_with_text = 0
+
+    for page_idx in range(total_pages):
+        page_num = page_idx + 1
+        if progress_callback:
+            pct = 0.08 + 0.78 * (page_idx / max(total_pages, 1))
+            progress_callback(pct, f"Page {page_num}/{total_pages} — image + text…")
+
+        page = doc[page_idx]
+
+        # Always save the page image (diagrams / profile drawings live here)
+        try:
+            native_png = _render_page(page)
+            blob_png = _resize_png(native_png, BLOB_IMAGE_MAX_W)
+            blob_url = blob_manager.upload_page_image(blob_png, slug, page_num)
+            blob_url_map[page_num] = blob_url
+        except Exception:
+            log.exception("Failed to render page %s of %s", page_num, source_name)
+            blob_url = ""
+
         text = page.get_text("text").strip()
-        if len(text) > 40:
-            pages.append(f"[Page {i}]\n{text}")
+        if len(text) < 40:
+            continue
+
+        pages_with_text += 1
+        page_chunks = _extract_text_chunks(f"[Page {page_num}]\n{text}")
+        for i, chunk in enumerate(page_chunks):
+            chunk = str(chunk).strip()
+            if not chunk:
+                continue
+            # Prefer a clean product name from the first pipe segment
+            name_guess = chunk.split("|", 1)[0].split("\n", 1)[0].strip().strip('[]"')
+            if len(name_guess) > 80:
+                name_guess = name_guess[:80].rsplit(" ", 1)[0]
+
+            chunk_id = f"{source_name}::page::{page_num:03d}::text::{i:02d}"
+            all_ids.append(chunk_id)
+            all_chunks.append(chunk)
+            all_metas.append({
+                "source": source_name,
+                "catalogue_name": display_name,
+                "catalogue_slug": slug,
+                "catalogue_type": "text_pdf",
+                "page_number": page_num,
+                "blob_url": blob_url,
+                "product_name": name_guess,
+                "category": "",
+                "specs_preview": "",
+                "char_count": len(chunk),
+            })
+
     doc.close()
 
-    if not pages:
-        return False, "No readable text found in this PDF."
-
-    batches = _batch_pages(pages)
-    all_chunks: list[str] = []
-
-    for i, batch in enumerate(batches):
-        if progress_callback:
-            pct = 0.20 + 0.50 * (i / max(len(batches), 1))
-            progress_callback(pct, f"Extracting products from batch {i+1}/{len(batches)}…")
-        all_chunks.extend(_extract_text_chunks(batch))
-
-    # Deduplicate
-    seen: set[str] = set()
-    unique = [c for c in all_chunks if not (c in seen or seen.add(c))]  # type: ignore
-
-    if not unique:
+    if not all_chunks:
         return False, "No product information could be extracted."
 
-    if progress_callback:
-        progress_callback(0.72, f"Embedding {len(unique)} chunks…")
-
-    vectors = azure_manager.embed_documents(unique)
-    ids = [f"{source_name}::text::chunk::{i}" for i in range(len(unique))]
-    metas = [
-        {
-            "source":         source_name,
-            "catalogue_name": source_name,
-            "catalogue_type": "text_pdf",
-            "page_number":    0,
-            "blob_url":       "",
-            "product_name":   "",
-            "category":       "",
-            "specs_preview":  "",
-            "char_count":     len(c),
-        }
-        for i, c in enumerate(unique)
-    ]
+    # Deduplicate by chunk text while keeping first page image association
+    seen: set[str] = set()
+    unique_docs: list[str] = []
+    unique_metas: list[dict] = []
+    unique_ids: list[str] = []
+    for doc_text, meta, cid in zip(all_chunks, all_metas, all_ids):
+        key = doc_text.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_docs.append(doc_text)
+        unique_metas.append(meta)
+        unique_ids.append(cid)
 
     if progress_callback:
-        progress_callback(0.90, "Writing to vector database…")
+        progress_callback(0.90, f"Embedding {len(unique_docs)} chunks…")
+
+    vectors = azure_manager.embed_documents(unique_docs)
+
+    if progress_callback:
+        progress_callback(0.95, "Writing to vector database…")
 
     delete_by_source(source_name)
-    add_chunks(ids=ids, embeddings=vectors, documents=unique, metadatas=metas)
+    add_chunks(
+        ids=unique_ids,
+        embeddings=vectors,
+        documents=unique_docs,
+        metadatas=unique_metas,
+    )
 
-    # Structured library (same source of truth as vision ingest)
     try:
-        from catalogue_library import seed_library_from_chunks
+        from catalogue_library import seed_library_from_chunks, upsert_catalogue
 
+        cover = blob_url_map.get(1) or next(iter(blob_url_map.values()), "")
+        upsert_catalogue(
+            slug=slug,
+            name=display_name,
+            source_filename=source_name,
+            page_count=total_pages,
+            cover_image_url=cover or "",
+        )
         seeded = seed_library_from_chunks(source=source_name)
-        log.info("Text PDF library seed: %s → %s", source_name, seeded)
+        log.info(
+            "Text PDF library: %s pages=%d chunks=%d images=%d seeded=%s",
+            source_name,
+            pages_with_text,
+            len(unique_docs),
+            len(blob_url_map),
+            seeded,
+        )
     except Exception:
         log.exception("Structured catalogue library write failed for text PDF %s", source_name)
 
     if progress_callback:
-        progress_callback(1.0, f"Done! {len(unique)} chunks indexed.")
+        progress_callback(
+            1.0,
+            f"Done! {len(unique_docs)} products · {len(blob_url_map)} page images.",
+        )
 
-    return True, f"Success: {len(unique)} product chunks from '{source_name}' added."
+    return (
+        True,
+        f"Success: {len(unique_docs)} products + {len(blob_url_map)} page images from '{source_name}'.",
+    )
 
 
 # ---------------------------------------------------------------------------
