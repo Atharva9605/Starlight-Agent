@@ -627,8 +627,84 @@ def _unwrap_document(raw: str) -> str:
     return text.strip()
 
 
+def _parse_vision_document(document: str, meta: dict) -> dict[str, Any] | None:
+    """Parse catalogue_ingestor document format into structured product fields."""
+    text = _unwrap_document(document)
+    if not text or not re.search(r"(?im)^Product:\s*", text):
+        return None
+
+    name = str(meta.get("product_name") or "").strip()
+    description = ""
+    features: list[str] = []
+    specs: dict[str, str] = {}
+    variants: list[str] = []
+    category = str(meta.get("category") or "").strip()
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if lower.startswith("product:"):
+            name = name or line.split(":", 1)[1].strip()
+        elif lower.startswith("category:"):
+            category = category or line.split(":", 1)[1].strip()
+        elif lower.startswith("description:"):
+            description = line.split(":", 1)[1].strip()
+        elif lower.startswith("features:"):
+            feat = line.split(":", 1)[1].strip()
+            features = [f.strip() for f in re.split(r"[;•|]", feat) if f.strip() and not _EMPTY_SPEC.match(f.strip())]
+        elif lower.startswith("variants:"):
+            var = line.split(":", 1)[1].strip()
+            variants = [v.strip() for v in var.split(",") if v.strip()]
+        elif lower.startswith("specifications:"):
+            spec_blob = line.split(":", 1)[1].strip()
+            for part in spec_blob.split("|"):
+                part = part.strip()
+                if ":" not in part:
+                    continue
+                label, _, val = part.partition(":")
+                key = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+                val = val.strip()
+                if not key or not val or _EMPTY_SPEC.match(val) or key in _SKIP_SPEC_KEYS:
+                    continue
+                # Normalize common catalogue labels
+                aliases = {
+                    "size": "dimensions",
+                    "input_power": "voltage",
+                    "input": "voltage",
+                    "ip": "ip_rating",
+                    "ik": "ik_rating",
+                    "watts_m": "wattage",
+                    "watts": "wattage",
+                    "beam": "beam_angle",
+                }
+                key = aliases.get(key, key)
+                specs[key] = val
+
+    if not name:
+        return None
+
+    preview_keys = ("code", "wattage", "cct", "dimensions", "ip_rating", "beam_angle", "voltage")
+    preview = " · ".join(specs[k] for k in preview_keys if k in specs)[:140]
+
+    return {
+        "product_name": name[:120],
+        "category": category or str(meta.get("category") or "other"),
+        "description": description,
+        "features": features,
+        "specs": specs,
+        "variants": variants,
+        "specs_preview": preview or str(meta.get("specs_preview") or ""),
+    }
+
+
 def _parse_pipe_product(document: str, meta: dict) -> dict[str, Any]:
     """Turn text-extract pipe lines into name + specs (drop 'not stated')."""
+    vision = _parse_vision_document(document, meta)
+    if vision:
+        return vision
+
     text = _unwrap_document(document)
     primary = next((ln.strip() for ln in text.splitlines() if ln.strip()), text)
     parts = [p.strip() for p in primary.split("|") if p.strip()]
@@ -647,6 +723,16 @@ def _parse_pipe_product(document: str, meta: dict) -> dict[str, Any]:
             key = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
             val = val.strip()
             if key and val and not _EMPTY_SPEC.match(val) and key not in _SKIP_SPEC_KEYS:
+                aliases = {
+                    "size": "dimensions",
+                    "input_power": "voltage",
+                    "input": "voltage",
+                    "ip": "ip_rating",
+                    "ik": "ik_rating",
+                    "watts_m": "wattage",
+                    "beam": "beam_angle",
+                }
+                key = aliases.get(key, key)
                 specs[key] = val
             continue
         if i == 0 and (not name or "|" in name or name.startswith("[")):
@@ -658,10 +744,9 @@ def _parse_pipe_product(document: str, meta: dict) -> dict[str, Any]:
     if not name:
         name = "Product"
 
-    preview_keys = ("wattage", "cct", "cri", "ip", "ip_rating", "dimensions", "beam")
-    preview = " · ".join(specs[k] for k in preview_keys if k in specs)[:120]
+    preview_keys = ("code", "wattage", "cct", "cri", "ip_rating", "dimensions", "beam_angle")
+    preview = " · ".join(specs[k] for k in preview_keys if k in specs)[:140]
 
-    # Short description: applications/notes only — never the raw pipe dump
     description = ""
     for key in ("applications", "notes"):
         if specs.get(key):
@@ -670,9 +755,12 @@ def _parse_pipe_product(document: str, meta: dict) -> dict[str, Any]:
 
     return {
         "product_name": name[:120],
-        "specs": specs,
-        "specs_preview": preview or str(meta.get("specs_preview") or ""),
+        "category": str(meta.get("category") or "other"),
         "description": description,
+        "features": [],
+        "specs": specs,
+        "variants": [],
+        "specs_preview": preview or str(meta.get("specs_preview") or ""),
     }
 
 
@@ -765,14 +853,14 @@ def seed_library_from_chunks(
                 "id": chunk_id,
                 "chunk_id": chunk_id,
                 "product_name": parsed["product_name"],
-                "category": str(meta.get("category") or "other"),
-                "description": parsed["description"] or "",
-                "features": [],
-                "specs": parsed["specs"],
-                "variants": [],
+                "category": parsed.get("category") or str(meta.get("category") or "other"),
+                "description": parsed.get("description") or "",
+                "features": parsed.get("features") or [],
+                "specs": parsed.get("specs") or {},
+                "variants": parsed.get("variants") or [],
                 "page_number": int(meta.get("page_number") or 0),
                 "image_url": str(meta.get("blob_url") or ""),
-                "specs_preview": parsed["specs_preview"],
+                "specs_preview": parsed.get("specs_preview") or "",
                 "sort_order": i,
             })
 
