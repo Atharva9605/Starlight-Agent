@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -8,6 +8,22 @@ import {
   type DisplayProduct,
 } from '../catalogue/productDisplay'
 
+function dedupeFeatures(product: DisplayProduct): string[] {
+  const specVals = new Set(
+    product.specs.map((s) => s.value.toLowerCase()).concat(
+      product.specsPreview.toLowerCase().split(/[·|]/).map((x) => x.trim()),
+    ),
+  )
+  return product.features.filter((f) => {
+    const lower = f.toLowerCase()
+    // Drop features that only restate IP/IK already in the table
+    if (/^temporary immersion|^impact resistant/i.test(f) && (specVals.has('ip67') || /ip67|ik10/.test(lower))) {
+      return !/ip67|ik10/i.test(f) || product.features.length <= 2
+    }
+    return true
+  })
+}
+
 function ProductCard({
   product,
   onOpen,
@@ -16,7 +32,7 @@ function ProductCard({
   onOpen: (p: DisplayProduct) => void
 }) {
   const initial = (product.name || 'P').slice(0, 1).toUpperCase()
-  const topSpecs = product.specs.slice(0, 4)
+  const topSpecs = product.specs.filter((s) => s.key !== 'code').slice(0, 4)
 
   return (
     <article className="pc-card">
@@ -46,26 +62,15 @@ function ProductCard({
 
         <h2 className="pc-title">{product.name}</h2>
 
-        {product.specsPreview ? <p className="pc-preview">{product.specsPreview}</p> : null}
-
         {topSpecs.length ? (
-          <dl className="pc-specs">
-            {topSpecs.map((s) => (
-              <div key={s.key} className="pc-spec">
-                <dt>{s.label}</dt>
-                <dd>{s.value}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : product.description ? (
-          <p className="pc-desc">{product.description}</p>
+          <p className="pc-preview">
+            {topSpecs.map((s) => s.value).join(' · ')}
+          </p>
         ) : null}
 
-        {product.imageUrl ? (
-          <button type="button" className="pc-link" onClick={() => onOpen(product)}>
-            View page
-          </button>
-        ) : null}
+        <button type="button" className="pc-link" onClick={() => onOpen(product)}>
+          View details
+        </button>
       </div>
     </article>
   )
@@ -78,34 +83,50 @@ function ProductModal({
   product: DisplayProduct
   onClose: () => void
 }) {
+  const features = dedupeFeatures(product)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
     <div className="pc-modal" role="dialog" aria-modal="true" aria-label={product.name}>
       <button type="button" className="pc-modal-backdrop" aria-label="Close" onClick={onClose} />
       <div className="pc-modal-panel">
         <header className="pc-modal-head">
-          <div>
-            <p className="pc-brand" style={{ color: '#64748b' }}>
-              {product.code || (product.pageNumber ? `Page ${product.pageNumber}` : 'Product')}
-            </p>
+          <div className="pc-modal-titleblock">
+            <div className="pc-meta-row">
+              {product.code ? <span className="pc-code">{product.code}</span> : null}
+              {product.category ? (
+                <span className="pc-cat">{product.category.replace(/_/g, ' ')}</span>
+              ) : null}
+              {product.pageNumber ? <span className="pc-page">Catalogue p. {product.pageNumber}</span> : null}
+            </div>
             <h2>{product.name}</h2>
+            {product.description ? <p className="pc-modal-tagline">{product.description}</p> : null}
           </div>
           <button type="button" className="pc-modal-close" onClick={onClose}>
             Close
           </button>
         </header>
+
         <div className="pc-modal-grid">
           <div className="pc-modal-media">
             {product.imageUrl ? (
-              <img src={product.imageUrl} alt={product.name} />
+              <img src={product.imageUrl} alt={`${product.name} catalogue page`} />
             ) : (
-              <div className="pc-monogram" style={{ minHeight: 280 }}>
+              <div className="pc-monogram" style={{ minHeight: 320 }}>
                 {(product.name || 'P').slice(0, 1)}
               </div>
             )}
           </div>
-          <div className="pc-modal-info">
-            {product.specsPreview ? <p className="pc-preview">{product.specsPreview}</p> : null}
-            {product.description ? <p className="pc-desc">{product.description}</p> : null}
+
+          <aside className="pc-modal-info">
+            <h3 className="pc-aside-label">Specifications</h3>
             {product.specs.length ? (
               <dl className="pc-specs pc-specs-modal">
                 {product.specs.map((s) => (
@@ -115,20 +136,27 @@ function ProductModal({
                   </div>
                 ))}
               </dl>
+            ) : (
+              <p className="pc-status">No structured specs for this product yet.</p>
+            )}
+
+            {features.length ? (
+              <>
+                <h3 className="pc-aside-label">Highlights</h3>
+                <ul className="pc-features">
+                  {features.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+              </>
             ) : null}
-            {product.features.length ? (
-              <ul className="pc-features">
-                {product.features.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-            ) : null}
+
             {product.imageUrl ? (
-              <a className="pc-link" href={product.imageUrl} target="_blank" rel="noreferrer">
-                Open full page image
+              <a className="pc-btn" href={product.imageUrl} target="_blank" rel="noreferrer">
+                Open full catalogue page
               </a>
             ) : null}
-          </div>
+          </aside>
         </div>
       </div>
     </div>
@@ -159,7 +187,6 @@ export function PublicCataloguePage() {
       if (p.category) set.add(p.category)
     }
     const list = Array.from(set).sort()
-    // Hide noisy single-use / overly long category taxonomies in the chip row
     const useful = list.filter((c) => c.length <= 28)
     return useful.length ? ['all', ...useful] : []
   }, [displayProducts])
