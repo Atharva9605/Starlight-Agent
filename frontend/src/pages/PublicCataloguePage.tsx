@@ -8,22 +8,33 @@ import {
   type DisplayProduct,
 } from '../catalogue/productDisplay'
 
-function ProductCard({ product }: { product: DisplayProduct }) {
+function ProductCard({
+  product,
+  onOpen,
+}: {
+  product: DisplayProduct
+  onOpen: (p: DisplayProduct) => void
+}) {
   const initial = (product.name || 'P').slice(0, 1).toUpperCase()
+  const topSpecs = product.specs.slice(0, 4)
 
   return (
     <article className="pc-card">
-      <div className={`pc-media${product.imageUrl ? '' : ' is-empty'}`}>
+      <button
+        type="button"
+        className={`pc-media${product.imageUrl ? '' : ' is-empty'}`}
+        onClick={() => onOpen(product)}
+        aria-label={`Open ${product.name}`}
+      >
         {product.imageUrl ? (
-          <a href={product.imageUrl} target="_blank" rel="noreferrer">
-            <img src={product.imageUrl} alt={product.name} loading="lazy" />
-          </a>
+          <img src={product.imageUrl} alt="" loading="lazy" />
         ) : (
-          <div className="pc-monogram" aria-hidden>
-            <span>{initial}</span>
-          </div>
+          <span className="pc-monogram" aria-hidden>
+            {initial}
+          </span>
         )}
-      </div>
+        {product.pageNumber ? <span className="pc-page-badge">p. {product.pageNumber}</span> : null}
+      </button>
 
       <div className="pc-body">
         <div className="pc-meta-row">
@@ -31,39 +42,96 @@ function ProductCard({ product }: { product: DisplayProduct }) {
           {product.category ? (
             <span className="pc-cat">{product.category.replace(/_/g, ' ')}</span>
           ) : null}
-          {product.pageNumber ? <span className="pc-page">p. {product.pageNumber}</span> : null}
         </div>
 
         <h2 className="pc-title">{product.name}</h2>
 
-        {product.specsPreview ? (
-          <p className="pc-preview">{product.specsPreview}</p>
-        ) : null}
+        {product.specsPreview ? <p className="pc-preview">{product.specsPreview}</p> : null}
 
-        {product.description ? (
-          <p className="pc-desc">{product.description}</p>
-        ) : null}
-
-        {product.specs.length ? (
+        {topSpecs.length ? (
           <dl className="pc-specs">
-            {product.specs.map((s) => (
+            {topSpecs.map((s) => (
               <div key={s.key} className="pc-spec">
                 <dt>{s.label}</dt>
                 <dd>{s.value}</dd>
               </div>
             ))}
           </dl>
+        ) : product.description ? (
+          <p className="pc-desc">{product.description}</p>
         ) : null}
 
-        {product.features.length ? (
-          <ul className="pc-features">
-            {product.features.slice(0, 4).map((f) => (
-              <li key={f}>{f}</li>
-            ))}
-          </ul>
+        {product.imageUrl ? (
+          <button type="button" className="pc-link" onClick={() => onOpen(product)}>
+            View page
+          </button>
         ) : null}
       </div>
     </article>
+  )
+}
+
+function ProductModal({
+  product,
+  onClose,
+}: {
+  product: DisplayProduct
+  onClose: () => void
+}) {
+  return (
+    <div className="pc-modal" role="dialog" aria-modal="true" aria-label={product.name}>
+      <button type="button" className="pc-modal-backdrop" aria-label="Close" onClick={onClose} />
+      <div className="pc-modal-panel">
+        <header className="pc-modal-head">
+          <div>
+            <p className="pc-brand" style={{ color: '#64748b' }}>
+              {product.code || (product.pageNumber ? `Page ${product.pageNumber}` : 'Product')}
+            </p>
+            <h2>{product.name}</h2>
+          </div>
+          <button type="button" className="pc-modal-close" onClick={onClose}>
+            Close
+          </button>
+        </header>
+        <div className="pc-modal-grid">
+          <div className="pc-modal-media">
+            {product.imageUrl ? (
+              <img src={product.imageUrl} alt={product.name} />
+            ) : (
+              <div className="pc-monogram" style={{ minHeight: 280 }}>
+                {(product.name || 'P').slice(0, 1)}
+              </div>
+            )}
+          </div>
+          <div className="pc-modal-info">
+            {product.specsPreview ? <p className="pc-preview">{product.specsPreview}</p> : null}
+            {product.description ? <p className="pc-desc">{product.description}</p> : null}
+            {product.specs.length ? (
+              <dl className="pc-specs pc-specs-modal">
+                {product.specs.map((s) => (
+                  <div key={s.key} className="pc-spec">
+                    <dt>{s.label}</dt>
+                    <dd>{s.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+            {product.features.length ? (
+              <ul className="pc-features">
+                {product.features.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+            ) : null}
+            {product.imageUrl ? (
+              <a className="pc-link" href={product.imageUrl} target="_blank" rel="noreferrer">
+                Open full page image
+              </a>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -71,6 +139,7 @@ export function PublicCataloguePage() {
   const { orgSlug = '', catalogueSlug = '' } = useParams()
   const [category, setCategory] = useState('all')
   const [query, setQuery] = useState('')
+  const [active, setActive] = useState<DisplayProduct | null>(null)
 
   const q = useQuery({
     queryKey: ['public-catalogue', orgSlug, catalogueSlug],
@@ -90,7 +159,9 @@ export function PublicCataloguePage() {
       if (p.category) set.add(p.category)
     }
     const list = Array.from(set).sort()
-    return list.length ? ['all', ...list] : []
+    // Hide noisy single-use / overly long category taxonomies in the chip row
+    const useful = list.filter((c) => c.length <= 28)
+    return useful.length ? ['all', ...useful] : []
   }, [displayProducts])
 
   const products = useMemo(() => {
@@ -128,6 +199,7 @@ export function PublicCataloguePage() {
 
   const cat = q.data
   const title = cleanCatalogueTitle(cat.name)
+  const withImages = displayProducts.filter((p) => p.imageUrl).length
 
   return (
     <div className="pc-page">
@@ -141,6 +213,7 @@ export function PublicCataloguePage() {
           <h1>{title}</h1>
           <p className="pc-hero-sub">
             {displayProducts.length} products
+            {withImages ? ` · ${withImages} with page art` : ''}
             {cat.page_count ? ` · ${cat.page_count} pages` : ''}
           </p>
         </div>
@@ -183,7 +256,7 @@ export function PublicCataloguePage() {
         ) : (
           <div className="pc-grid">
             {products.map((p) => (
-              <ProductCard key={p.id} product={p} />
+              <ProductCard key={p.id} product={p} onOpen={setActive} />
             ))}
           </div>
         )}
@@ -193,6 +266,8 @@ export function PublicCataloguePage() {
           <span>Digital product catalogue</span>
         </footer>
       </div>
+
+      {active ? <ProductModal product={active} onClose={() => setActive(null)} /> : null}
     </div>
   )
 }
