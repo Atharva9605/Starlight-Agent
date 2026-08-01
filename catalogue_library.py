@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Any, Optional
 
@@ -602,19 +603,76 @@ def _display_name_from_filename(filename: str) -> str:
     stem = Path(filename or "Catalogue").stem
     name = re.sub(r"[_\-]+", " ", stem).strip()
     name = re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
+    name = re.sub(r"\.pdf$", "", name, flags=re.I).strip()
     return name.title() or "Catalogue"
 
 
-def _product_name_from_document(document: str, meta: dict) -> str:
+_EMPTY_SPEC = re.compile(r"^(not stated|n/?a|none|unknown|-|—|–|\.?)$", re.I)
+
+
+def _unwrap_document(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if text.startswith("[") or text.startswith('"'):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                text = "\n".join(str(x) for x in parsed)
+            elif isinstance(parsed, str):
+                text = parsed
+        except Exception:
+            text = text.strip("[]\"' \n")
+    return text.strip()
+
+
+def _parse_pipe_product(document: str, meta: dict) -> dict[str, Any]:
+    """Turn text-extract pipe lines into name + specs (drop 'not stated')."""
+    text = _unwrap_document(document)
+    primary = next((ln.strip() for ln in text.splitlines() if ln.strip()), text)
+    parts = [p.strip() for p in primary.split("|") if p.strip()]
+
     name = str(meta.get("product_name") or "").strip()
-    if name:
-        return name
-    text = (document or "").strip()
-    if text.startswith("["):
-        # text extractor sometimes wraps JSON-ish strings
-        text = text.strip("[]\"' \n")
-    first = text.split("|", 1)[0].split("\n", 1)[0].strip().strip('"')
-    return (first[:120] if first else "Product")
+    specs: dict[str, str] = {}
+    if isinstance(meta.get("specs"), dict):
+        for k, v in meta["specs"].items():
+            sv = str(v or "").strip()
+            if sv and not _EMPTY_SPEC.match(sv):
+                specs[str(k)] = sv
+
+    for i, part in enumerate(parts):
+        if ":" in part:
+            label, _, val = part.partition(":")
+            key = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+            val = val.strip()
+            if key and val and not _EMPTY_SPEC.match(val):
+                specs[key] = val
+            continue
+        if i == 0 and (not name or "|" in name or name.startswith("[")):
+            name = part
+            continue
+        if re.match(r"^\d+(\.\d+)?\s*x\s*\d+", part, re.I) or re.search(r"\d+\s*mm", part, re.I):
+            specs.setdefault("dimensions", part)
+
+    if not name:
+        name = "Product"
+
+    preview_keys = ("wattage", "cct", "cri", "ip", "ip_rating", "dimensions", "beam")
+    preview = " · ".join(specs[k] for k in preview_keys if k in specs)[:120]
+
+    # Short description: applications/notes only — never the raw pipe dump
+    description = ""
+    for key in ("applications", "notes"):
+        if specs.get(key):
+            description = specs.pop(key)
+            break
+
+    return {
+        "product_name": name[:120],
+        "specs": specs,
+        "specs_preview": preview or str(meta.get("specs_preview") or ""),
+        "description": description,
+    }
 
 
 def seed_library_from_chunks(
@@ -674,9 +732,8 @@ def seed_library_from_chunks(
             meta0 = {}
 
         slug = str(meta0.get("catalogue_slug") or "").strip() or _slug_from_filename(src)
-        name = (
-            str(meta0.get("catalogue_name") or chunk_rows[0][2] or "").strip()
-            or _display_name_from_filename(src)
+        name = _display_name_from_filename(
+            str(meta0.get("catalogue_name") or chunk_rows[0][2] or src)
         )
         cover = ""
         for r in chunk_rows:
@@ -702,18 +759,19 @@ def seed_library_from_chunks(
             meta = metadata if isinstance(metadata, dict) else (json.loads(metadata) if metadata else {})
             if not isinstance(meta, dict):
                 meta = {}
+            parsed = _parse_pipe_product(str(document or ""), meta)
             products.append({
                 "id": chunk_id,
                 "chunk_id": chunk_id,
-                "product_name": _product_name_from_document(str(document or ""), meta),
+                "product_name": parsed["product_name"],
                 "category": str(meta.get("category") or "other"),
-                "description": str(document or "")[:2000],
+                "description": parsed["description"] or "",
                 "features": [],
-                "specs": {},
+                "specs": parsed["specs"],
                 "variants": [],
                 "page_number": int(meta.get("page_number") or 0),
                 "image_url": str(meta.get("blob_url") or ""),
-                "specs_preview": str(meta.get("specs_preview") or ""),
+                "specs_preview": parsed["specs_preview"],
                 "sort_order": i,
             })
 

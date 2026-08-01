@@ -2,10 +2,75 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import {
+  cleanCatalogueTitle,
+  toDisplayProduct,
+  type DisplayProduct,
+} from '../catalogue/productDisplay'
+
+function ProductCard({ product }: { product: DisplayProduct }) {
+  const initial = (product.name || 'P').slice(0, 1).toUpperCase()
+
+  return (
+    <article className="pc-card">
+      <div className={`pc-media${product.imageUrl ? '' : ' is-empty'}`}>
+        {product.imageUrl ? (
+          <a href={product.imageUrl} target="_blank" rel="noreferrer">
+            <img src={product.imageUrl} alt={product.name} loading="lazy" />
+          </a>
+        ) : (
+          <div className="pc-monogram" aria-hidden>
+            <span>{initial}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="pc-body">
+        <div className="pc-meta-row">
+          {product.code ? <span className="pc-code">{product.code}</span> : null}
+          {product.category ? (
+            <span className="pc-cat">{product.category.replace(/_/g, ' ')}</span>
+          ) : null}
+          {product.pageNumber ? <span className="pc-page">p. {product.pageNumber}</span> : null}
+        </div>
+
+        <h2 className="pc-title">{product.name}</h2>
+
+        {product.specsPreview ? (
+          <p className="pc-preview">{product.specsPreview}</p>
+        ) : null}
+
+        {product.description ? (
+          <p className="pc-desc">{product.description}</p>
+        ) : null}
+
+        {product.specs.length ? (
+          <dl className="pc-specs">
+            {product.specs.map((s) => (
+              <div key={s.key} className="pc-spec">
+                <dt>{s.label}</dt>
+                <dd>{s.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+
+        {product.features.length ? (
+          <ul className="pc-features">
+            {product.features.slice(0, 4).map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </article>
+  )
+}
 
 export function PublicCataloguePage() {
   const { orgSlug = '', catalogueSlug = '' } = useParams()
   const [category, setCategory] = useState('all')
+  const [query, setQuery] = useState('')
 
   const q = useQuery({
     queryKey: ['public-catalogue', orgSlug, catalogueSlug],
@@ -14,25 +79,37 @@ export function PublicCataloguePage() {
     retry: false,
   })
 
+  const displayProducts = useMemo(
+    () => (q.data?.products || []).map(toDisplayProduct),
+    [q.data?.products],
+  )
+
   const categories = useMemo(() => {
     const set = new Set<string>()
-    for (const p of q.data?.products || []) {
+    for (const p of displayProducts) {
       if (p.category) set.add(p.category)
     }
-    return ['all', ...Array.from(set).sort()]
-  }, [q.data?.products])
+    const list = Array.from(set).sort()
+    return list.length ? ['all', ...list] : []
+  }, [displayProducts])
 
   const products = useMemo(() => {
-    const list = q.data?.products || []
-    if (category === 'all') return list
-    return list.filter((p) => p.category === category)
-  }, [q.data?.products, category])
+    const qLower = query.trim().toLowerCase()
+    return displayProducts.filter((p) => {
+      if (category !== 'all' && p.category !== category) return false
+      if (!qLower) return true
+      const hay = [p.name, p.code, p.specsPreview, p.description, ...p.specs.map((s) => s.value)]
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(qLower)
+    })
+  }, [displayProducts, category, query])
 
   if (q.isLoading) {
     return (
-      <div className="public-catalogue">
-        <div className="public-catalogue-inner">
-          <p className="muted">Loading catalogue…</p>
+      <div className="pc-page">
+        <div className="pc-shell">
+          <p className="pc-status">Loading catalogue…</p>
         </div>
       </div>
     )
@@ -40,75 +117,81 @@ export function PublicCataloguePage() {
 
   if (q.isError || !q.data) {
     return (
-      <div className="public-catalogue">
-        <div className="public-catalogue-inner">
-          <h1>Catalogue unavailable</h1>
-          <p className="muted">{(q.error as Error)?.message || 'Not found'}</p>
+      <div className="pc-page">
+        <div className="pc-shell">
+          <h1 className="pc-error-title">Catalogue unavailable</h1>
+          <p className="pc-status">{(q.error as Error)?.message || 'Not found'}</p>
         </div>
       </div>
     )
   }
 
   const cat = q.data
+  const title = cleanCatalogueTitle(cat.name)
 
   return (
-    <div className="public-catalogue">
-      <header className="public-catalogue-hero">
+    <div className="pc-page">
+      <header className="pc-hero">
         {cat.cover_image_url ? (
-          <img className="public-catalogue-cover" src={cat.cover_image_url} alt="" />
+          <img className="pc-hero-bg" src={cat.cover_image_url} alt="" />
         ) : null}
-        <div className="public-catalogue-hero-copy">
-          <p className="public-catalogue-brand">{cat.organization_name || 'Starlight'}</p>
-          <h1>{cat.name}</h1>
-          <p className="muted">
-            {cat.product_count ?? products.length} products
+        <div className="pc-hero-veil" />
+        <div className="pc-hero-copy">
+          <p className="pc-brand">{cat.organization_name || 'Starlight Linear LED'}</p>
+          <h1>{title}</h1>
+          <p className="pc-hero-sub">
+            {displayProducts.length} products
             {cat.page_count ? ` · ${cat.page_count} pages` : ''}
           </p>
         </div>
       </header>
 
-      <div className="public-catalogue-inner">
-        <div className="public-catalogue-filters">
-          {categories.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`pill ${category === c ? 'ok' : ''}`}
-              onClick={() => setCategory(c)}
-            >
-              {c === 'all' ? 'All' : c.replace(/_/g, ' ')}
-            </button>
-          ))}
+      <div className="pc-shell">
+        <div className="pc-toolbar">
+          <label className="pc-search">
+            <span className="sr-only">Search products</span>
+            <input
+              type="search"
+              placeholder="Search name, code, wattage…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </label>
+          {categories.length ? (
+            <div className="pc-filters" role="tablist" aria-label="Categories">
+              {categories.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  role="tab"
+                  aria-selected={category === c}
+                  className={`pc-filter${category === c ? ' is-active' : ''}`}
+                  onClick={() => setCategory(c)}
+                >
+                  {c === 'all' ? 'All' : c.replace(/_/g, ' ')}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {!products.length ? (
-          <div className="empty-state">
-            <strong>No products in this category</strong>
+          <div className="pc-empty">
+            <strong>No matching products</strong>
+            <p>Try another search or category.</p>
           </div>
         ) : (
-          <div className="public-product-grid">
+          <div className="pc-grid">
             {products.map((p) => (
-              <article key={p.id} className="public-product-card">
-                {p.image_url ? (
-                  <a href={p.image_url} target="_blank" rel="noreferrer">
-                    <img src={p.image_url} alt={p.product_name} loading="lazy" />
-                  </a>
-                ) : (
-                  <div className="public-product-placeholder" />
-                )}
-                <div className="public-product-body">
-                  <span className="pill">{(p.category || 'other').replace(/_/g, ' ')}</span>
-                  <h2>{p.product_name}</h2>
-                  {p.specs_preview ? <p className="ref-specs">{p.specs_preview}</p> : null}
-                  {p.description ? <p className="muted">{p.description}</p> : null}
-                  {p.page_number ? (
-                    <p className="muted" style={{ fontSize: 12 }}>Page {p.page_number}</p>
-                  ) : null}
-                </div>
-              </article>
+              <ProductCard key={p.id} product={p} />
             ))}
           </div>
         )}
+
+        <footer className="pc-footer">
+          <span>{cat.organization_name || 'Starlight Linear LED'}</span>
+          <span>Digital product catalogue</span>
+        </footer>
       </div>
     </div>
   )
