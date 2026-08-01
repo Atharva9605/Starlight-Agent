@@ -172,6 +172,15 @@ def _ingest_text_pdf(
     delete_by_source(source_name)
     add_chunks(ids=ids, embeddings=vectors, documents=unique, metadatas=metas)
 
+    # Structured library (same source of truth as vision ingest)
+    try:
+        from catalogue_library import seed_library_from_chunks
+
+        seeded = seed_library_from_chunks(source=source_name)
+        log.info("Text PDF library seed: %s → %s", source_name, seeded)
+    except Exception:
+        log.exception("Structured catalogue library write failed for text PDF %s", source_name)
+
     if progress_callback:
         progress_callback(1.0, f"Done! {len(unique)} chunks indexed.")
 

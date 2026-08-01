@@ -584,3 +584,146 @@ def catalogue_url_for_products(
             return share_url(org_slug, row[0])
     finally:
         conn.close()
+
+
+def _slug_from_filename(filename: str) -> str:
+    import re
+    from pathlib import Path
+
+    stem = Path(filename or "catalogue").stem
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", stem).strip("_").lower()
+    return (slug or "catalogue")[:60]
+
+
+def _display_name_from_filename(filename: str) -> str:
+    import re
+    from pathlib import Path
+
+    stem = Path(filename or "Catalogue").stem
+    name = re.sub(r"[_\-]+", " ", stem).strip()
+    name = re.sub(r"\s*\(\d+\)\s*$", "", name).strip()
+    return name.title() or "Catalogue"
+
+
+def _product_name_from_document(document: str, meta: dict) -> str:
+    name = str(meta.get("product_name") or "").strip()
+    if name:
+        return name
+    text = (document or "").strip()
+    if text.startswith("["):
+        # text extractor sometimes wraps JSON-ish strings
+        text = text.strip("[]\"' \n")
+    first = text.split("|", 1)[0].split("\n", 1)[0].strip().strip('"')
+    return (first[:120] if first else "Product")
+
+
+def seed_library_from_chunks(
+    source: str | None = None,
+    organization_id: str | None = None,
+) -> list[dict]:
+    """
+    Backfill catalogues + products from existing catalogue_chunks rows.
+
+    Used for text-PDF ingest and one-shot repair when RAG exists but the
+    structured library is empty.
+    """
+    if not _use_postgres():
+        return []
+
+    oid = _org_id(organization_id)
+    conn = _pg_conn()
+    seeded: list[dict] = []
+    try:
+        with conn.cursor() as cur:
+            if source:
+                cur.execute(
+                    """
+                    SELECT id, source, catalogue_name, document, metadata
+                    FROM catalogue_chunks
+                    WHERE organization_id = %s AND source = %s
+                    ORDER BY id
+                    """,
+                    (oid, source),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, source, catalogue_name, document, metadata
+                    FROM catalogue_chunks
+                    WHERE organization_id = %s
+                    ORDER BY source, id
+                    """,
+                    (oid,),
+                )
+            rows = cur.fetchall()
+        conn.commit()
+    finally:
+        conn.close()
+
+    by_source: dict[str, list[tuple]] = {}
+    for row in rows:
+        by_source.setdefault(str(row[1] or ""), []).append(row)
+
+    for src, chunk_rows in by_source.items():
+        if not src:
+            continue
+        meta0 = chunk_rows[0][4]
+        if isinstance(meta0, str):
+            meta0 = json.loads(meta0)
+        if not isinstance(meta0, dict):
+            meta0 = {}
+
+        slug = str(meta0.get("catalogue_slug") or "").strip() or _slug_from_filename(src)
+        name = (
+            str(meta0.get("catalogue_name") or chunk_rows[0][2] or "").strip()
+            or _display_name_from_filename(src)
+        )
+        cover = ""
+        for r in chunk_rows:
+            m = r[4] if isinstance(r[4], dict) else (json.loads(r[4]) if r[4] else {})
+            url = str((m or {}).get("blob_url") or "")
+            if url and not url.startswith("["):
+                cover = url
+                break
+
+        cat = upsert_catalogue(
+            slug=slug,
+            name=name,
+            source_filename=src,
+            page_count=0,
+            cover_image_url=cover,
+            organization_id=oid,
+        )
+        if not cat:
+            continue
+
+        products: list[dict[str, Any]] = []
+        for i, (chunk_id, _src, _cname, document, metadata) in enumerate(chunk_rows):
+            meta = metadata if isinstance(metadata, dict) else (json.loads(metadata) if metadata else {})
+            if not isinstance(meta, dict):
+                meta = {}
+            products.append({
+                "id": chunk_id,
+                "chunk_id": chunk_id,
+                "product_name": _product_name_from_document(str(document or ""), meta),
+                "category": str(meta.get("category") or "other"),
+                "description": str(document or "")[:2000],
+                "features": [],
+                "specs": {},
+                "variants": [],
+                "page_number": int(meta.get("page_number") or 0),
+                "image_url": str(meta.get("blob_url") or ""),
+                "specs_preview": str(meta.get("specs_preview") or ""),
+                "sort_order": i,
+            })
+
+        replace_products(cat["id"], products, organization_id=oid)
+        seeded.append({**cat, "product_count": len(products)})
+        log.info(
+            "seed_library_from_chunks: %s → %s (%d products)",
+            src,
+            cat["slug"],
+            len(products),
+        )
+
+    return seeded
