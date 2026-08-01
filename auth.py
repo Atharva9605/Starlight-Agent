@@ -107,6 +107,9 @@ def _is_public_path(path: str) -> bool:
     # (no JWT). Only expose the static media tree, never /api/*.
     if path.startswith("/media/"):
         return True
+    # Public digital catalogue (share links from emails / website)
+    if path.startswith("/api/public/"):
+        return True
     return False
 
 

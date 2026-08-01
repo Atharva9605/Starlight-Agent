@@ -216,11 +216,12 @@ def _build_chunk_and_metadata(
     page_number: int,
     blob_url: str,
     source_filename: str,
-) -> tuple[str, dict]:
+) -> tuple[str, dict, dict]:
     """
     Convert a raw product dict into:
       • document string   – rich text ready for embedding
-      • metadata dict     – stored alongside in ChromaDB
+      • metadata dict     – stored alongside in ChromaDB / pgvector
+      • library_row dict  – full structured product for catalogue_products
     """
     # `or` rather than a .get() default: the model routinely emits explicit
     # nulls ("specs": null), and a default only applies when the key is absent.
@@ -282,7 +283,19 @@ def _build_chunk_and_metadata(
         "char_count":       len(document),
     }
 
-    return document, metadata
+    library_row = {
+        "product_name": name,
+        "category": category,
+        "description": description,
+        "features": list(features),
+        "specs": dict(specs),
+        "variants": list(variants),
+        "page_number": page_number,
+        "image_url": blob_url,
+        "specs_preview": specs_preview,
+    }
+
+    return document, metadata, library_row
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +357,7 @@ def ingest_catalogue(
     all_docs:  list[str]  = []
     all_metas: list[dict] = []
     all_ids:   list[str]  = []
+    all_library: list[dict] = []
     blob_url_map: dict[int, str] = {}
 
     pages_skipped = 0
@@ -388,9 +402,9 @@ def ingest_catalogue(
 
             log.info("Page %s: %d product(s) extracted.", page_label, len(products))
 
-            # 6. Build chunks + metadata
+            # 6. Build chunks + metadata + library rows
             for prod_idx, product in enumerate(products):
-                document, metadata = _build_chunk_and_metadata(
+                document, metadata, library_row = _build_chunk_and_metadata(
                     product=product,
                     catalogue_name=display_name,
                     catalogue_slug=slug,
@@ -400,9 +414,13 @@ def ingest_catalogue(
                     source_filename=filename,
                 )
                 chunk_id = f"{filename}::page::{page_num:03d}::product::{prod_idx:02d}"
+                library_row["id"] = chunk_id
+                library_row["chunk_id"] = chunk_id
+                library_row["sort_order"] = len(all_library)
                 all_docs.append(document)
                 all_metas.append(metadata)
                 all_ids.append(chunk_id)
+                all_library.append(library_row)
         except Exception:
             log.exception("Page %s failed — skipping it.", page_label)
             pages_failed += 1
@@ -436,6 +454,28 @@ def ingest_catalogue(
 
     add_chunks(ids=all_ids, embeddings=vectors, documents=all_docs, metadatas=all_metas)
 
+    # 8. Structured catalogue library (Postgres) — source of truth for web + email
+    try:
+        from catalogue_library import replace_products, upsert_catalogue
+
+        cover = blob_url_map.get(1) or next(iter(blob_url_map.values()), "")
+        cat = upsert_catalogue(
+            slug=slug,
+            name=display_name,
+            source_filename=filename,
+            page_count=total_pages,
+            cover_image_url=cover or "",
+        )
+        if cat:
+            replace_products(cat["id"], all_library)
+            log.info(
+                "Library: catalogue %s with %d products",
+                cat["slug"],
+                len(all_library),
+            )
+    except Exception:
+        log.exception("Structured catalogue library write failed for %s", filename)
+
     pages_processed = total_pages - pages_skipped
     if progress_callback:
         progress_callback(
@@ -456,6 +496,7 @@ def ingest_catalogue(
         "blob_urls":       blob_url_map,
         "catalogue_name":  display_name,
         "catalogue_type":  catalogue_type,
+        "catalogue_slug":  slug,
     }
 
 

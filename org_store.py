@@ -158,6 +158,9 @@ def run_saas_migrations() -> None:
         seed_default_org_config(conn, default_org_id)
         conn.commit()
 
+        _run_sql_file(conn, "002_catalogue_library.sql")
+        conn.commit()
+
         log.info("SaaS migrations complete (default org: %s)", default_org_id)
     except Exception as exc:
         conn.rollback()

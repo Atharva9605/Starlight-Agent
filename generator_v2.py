@@ -57,12 +57,62 @@ def _build_rag_results(
     docs: list[str],
     metas: list[dict],
     distances: list[float] | None = None,
+    chunk_ids: list[str] | None = None,
 ) -> tuple[str, list[str], list[dict], list[dict]]:
     """Build context string, raw docs, product refs, and ranked chunk trace."""
     context_parts: list[str] = []
     product_references: list[dict] = []
     chunks: list[dict] = []
-    seen_blobs: set[str] = set()
+    seen_keys: set[str] = set()
+
+    # Prefer structured library rows when available
+    library_products: list[dict] = []
+    try:
+        from catalogue_library import resolve_products_from_rag_metas
+
+        library_products = resolve_products_from_rag_metas(
+            metas,
+            chunk_ids=chunk_ids,
+        )
+    except Exception:
+        library_products = []
+
+    catalogue_url = ""
+    if library_products:
+        try:
+            from catalogue_library import catalogue_url_for_products
+
+            catalogue_url = catalogue_url_for_products(library_products)
+        except Exception:
+            catalogue_url = ""
+
+        for prod in library_products:
+            blob_url = prod.get("image_url") or prod.get("blob_url") or ""
+            try:
+                from azure_blob import resolve_blob_url
+
+                blob_url = resolve_blob_url(
+                    blob_url,
+                    catalogue_slug=str(prod.get("catalogue_slug") or ""),
+                    page_number=prod.get("page_number", 0),
+                )
+            except Exception:
+                pass
+            key = prod.get("id") or blob_url
+            if not key or key in seen_keys:
+                continue
+            if blob_url and str(blob_url).startswith("["):
+                continue
+            seen_keys.add(str(key))
+            product_references.append({
+                "product_name": prod.get("product_name") or "Starlight Product",
+                "catalogue_name": prod.get("catalogue_name") or "",
+                "page_number": prod.get("page_number", 0),
+                "blob_url": blob_url,
+                "category": prod.get("category", ""),
+                "specs_preview": prod.get("specs_preview", ""),
+                "catalogue_url": catalogue_url,
+            })
 
     for i, (doc, meta) in enumerate(zip(docs, metas)):
         page_num = meta.get("page_number", 0)
@@ -85,25 +135,34 @@ def _build_rag_results(
         context_parts.append(f"{ref_label}\n{doc}")
 
         dist = distances[i] if distances and i < len(distances) else None
+        cid = chunk_ids[i] if chunk_ids and i < len(chunk_ids) else None
         chunks.append({
             "rank": i + 1,
+            "id": cid,
             "document": doc,
             "metadata": meta,
             "distance": dist,
         })
 
-        if blob_url and blob_url not in seen_blobs and not blob_url.startswith("["):
-            seen_blobs.add(blob_url)
-            product_references.append({
-                "product_name": prod_name or "Starlight Product",
-                "catalogue_name": cat_name,
-                "page_number": page_num,
-                "blob_url": blob_url,
-                "category": meta.get("category", ""),
-                "specs_preview": meta.get("specs_preview", ""),
-            })
+        # Fallback product cards from chunk metadata when library is empty
+        if not library_products:
+            if blob_url and blob_url not in seen_keys and not str(blob_url).startswith("["):
+                seen_keys.add(blob_url)
+                product_references.append({
+                    "product_name": prod_name or "Starlight Product",
+                    "catalogue_name": cat_name,
+                    "page_number": page_num,
+                    "blob_url": blob_url,
+                    "category": meta.get("category", ""),
+                    "specs_preview": meta.get("specs_preview", ""),
+                    "catalogue_url": "",
+                })
 
     context_str = "\n\n---\n\n".join(context_parts) if context_parts else "No specific catalogue context found."
+    # Stash catalogue_url on each ref for templates that read the first one
+    if catalogue_url:
+        for ref in product_references:
+            ref.setdefault("catalogue_url", catalogue_url)
     return context_str, docs, product_references, chunks
 
 
@@ -150,6 +209,7 @@ def query_rag_with_trace(
                 "product_refs": [],
                 "raw_docs": [],
                 "empty_rag": True,
+                "catalogue_url": "",
                 "error": f"Embedding failed: {exc}",
             }
 
@@ -164,24 +224,28 @@ def query_rag_with_trace(
                 "product_refs": [],
                 "raw_docs": [],
                 "empty_rag": True,
+                "catalogue_url": "",
                 "error": f"Vector search failed: {exc}",
             }
 
         docs = results.get("documents", [[]])[0]
         metas = results.get("metadatas", [[]])[0]
         dists = results.get("distances", [[]])[0] if results.get("distances") else []
+        ids = list(results.get("ids", [[]])[0] or [])
+        if len(ids) < len(docs):
+            ids = ids + [None] * (len(docs) - len(ids))
 
         # Drop weak matches
         if docs and dists:
             kept = [
-                (d, m, dist)
-                for d, m, dist in zip(docs, metas, dists)
+                (d, m, dist, cid)
+                for d, m, dist, cid in zip(docs, metas, dists, ids)
                 if dist is None or float(dist) <= max_distance
             ]
             if kept:
-                docs, metas, dists = map(list, zip(*kept))
+                docs, metas, dists, ids = map(list, zip(*kept))
             else:
-                docs, metas, dists = [], [], []
+                docs, metas, dists, ids = [], [], [], []
 
         if not docs:
             bag["meta"] = {"empty_rag": True}
@@ -197,11 +261,21 @@ def query_rag_with_trace(
                 "product_refs": [],
                 "raw_docs": [],
                 "empty_rag": True,
+                "catalogue_url": "",
             }
 
-        context_str, raw_docs, product_refs, chunks = _build_rag_results(docs, metas, dists)
+        context_str, raw_docs, product_refs, chunks = _build_rag_results(
+            docs,
+            metas,
+            dists,
+            chunk_ids=[str(i) if i else "" for i in ids],
+        )
+        catalogue_url = ""
+        if product_refs:
+            catalogue_url = str(product_refs[0].get("catalogue_url") or "")
         bag["chunk_ids"] = [
-            str((c.get("metadata") or {}).get("source", c.get("rank"))) for c in chunks
+            str(c.get("id") or (c.get("metadata") or {}).get("source", c.get("rank")))
+            for c in chunks
         ]
         return {
             "hyde_doc": hyde_doc,
@@ -211,6 +285,7 @@ def query_rag_with_trace(
             "product_refs": product_refs,
             "raw_docs": raw_docs,
             "empty_rag": False,
+            "catalogue_url": catalogue_url,
         }
 
 
@@ -572,7 +647,10 @@ def generate_eml_from_record(
         sender_email=sender["sender_email"],
         company_logo_url=sender.get("company_logo_url", "cid:company_logo"),
         catalog_chunks=raw_docs,
-        referenced_products=product_refs,   # ← NEW: product reference cards
+        referenced_products=product_refs,
+        catalogue_url=(rag_trace or {}).get("catalogue_url")
+        or ((product_refs or [{}])[0].get("catalogue_url") if product_refs else "")
+        or "",
     )
 
     # Inline the template's <style> rules before anything is stored, so the

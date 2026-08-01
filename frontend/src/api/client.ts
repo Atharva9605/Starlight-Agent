@@ -31,6 +31,49 @@ export type CatalogueJob = {
   catalogues: string[]
 }
 
+export type LibraryCatalogue = {
+  id: string
+  slug: string
+  name: string
+  source_filename?: string
+  page_count?: number
+  cover_image_url?: string
+  product_count?: number
+  share_enabled?: boolean
+  org_slug?: string
+  share_url?: string
+}
+
+export type LibraryProduct = {
+  id: string
+  product_name: string
+  category: string
+  description?: string
+  features?: string[]
+  specs?: Record<string, string>
+  variants?: string[]
+  page_number?: number
+  image_url?: string
+  specs_preview?: string
+}
+
+export type LibraryCatalogueDetail = LibraryCatalogue & {
+  products: LibraryProduct[]
+}
+
+export type PublicCatalogue = {
+  id: string
+  name: string
+  slug: string
+  org_slug?: string
+  organization_name?: string
+  cover_image_url?: string
+  page_count?: number
+  product_count?: number
+  share_url?: string
+  products: LibraryProduct[]
+}
+
 export type OrgMember = {
   id: string
   email: string
@@ -233,6 +276,25 @@ export const api = {
     return body as { job_id: string; total_files: number }
   },
   catalogueJob: (jobId: string) => request<CatalogueJob>(`/api/catalogue-jobs/${jobId}`),
+  listCatalogues: () =>
+    request<{ catalogues: LibraryCatalogue[] }>('/api/catalogues'),
+  getCatalogue: (id: string) => request<LibraryCatalogueDetail>(`/api/catalogues/${id}`),
+  publicCatalogue: (orgSlug: string, catalogueSlug: string) =>
+    fetch(`${API_URL}/api/public/catalogues/${encodeURIComponent(orgSlug)}/${encodeURIComponent(catalogueSlug)}`).then(
+      async (res) => {
+        if (!res.ok) {
+          let detail = res.statusText
+          try {
+            const body = await res.json()
+            detail = body.detail || detail
+          } catch {
+            /* ignore */
+          }
+          throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+        }
+        return res.json() as Promise<PublicCatalogue>
+      },
+    ),
   campaignGenerate: (body: {
     lead: Record<string, any>
     template: string

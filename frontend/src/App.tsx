@@ -11,6 +11,7 @@ import { CampaignSetupPage } from './pages/campaigns/CampaignSetupPage'
 import { CampaignReviewPage } from './pages/campaigns/CampaignReviewPage'
 import { CampaignLivePage } from './pages/campaigns/CampaignLivePage'
 import { CataloguesPage } from './pages/CataloguesPage'
+import { PublicCataloguePage } from './pages/PublicCataloguePage'
 import { PromptsPage } from './pages/PromptsPage'
 import { TemplatesPage } from './pages/TemplatesPage'
 import { AiCreateTemplatePage } from './pages/AiCreateTemplatePage'
@@ -35,6 +36,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/c/:orgSlug/:catalogueSlug" element={<PublicCataloguePage />} />
             <Route
               path="/"
               element={

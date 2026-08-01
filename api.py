@@ -752,6 +752,62 @@ async def get_kb():
         "store": store_info(),
     }
 
+
+@app.get("/api/catalogues")
+async def list_org_catalogues():
+    """Authenticated: structured catalogue library for the current org."""
+    from catalogue_library import list_catalogues
+
+    return {"catalogues": list_catalogues()}
+
+
+@app.get("/api/catalogues/{catalogue_id}")
+async def get_org_catalogue(catalogue_id: str):
+    from catalogue_library import get_catalogue
+
+    cat = get_catalogue(catalogue_id, include_products=True)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Catalogue not found")
+    return cat
+
+
+@app.get("/api/public/catalogues/{org_slug}/{catalogue_slug}")
+async def public_catalogue(org_slug: str, catalogue_slug: str):
+    """Unauthenticated digital catalogue page data."""
+    from catalogue_library import get_catalogue_by_slug
+
+    cat = get_catalogue_by_slug(org_slug, catalogue_slug, public_only=True)
+    if not cat:
+        raise HTTPException(status_code=404, detail="Catalogue not found")
+    # Strip internal ids that aren't needed publicly beyond product display
+    return {
+        "id": cat["id"],
+        "name": cat["name"],
+        "slug": cat["slug"],
+        "org_slug": cat.get("org_slug"),
+        "organization_name": cat.get("organization_name", ""),
+        "cover_image_url": cat.get("cover_image_url", ""),
+        "page_count": cat.get("page_count", 0),
+        "product_count": cat.get("product_count", 0),
+        "share_url": cat.get("share_url", ""),
+        "products": [
+            {
+                "id": p["id"],
+                "product_name": p["product_name"],
+                "category": p["category"],
+                "description": p.get("description", ""),
+                "features": p.get("features") or [],
+                "specs": p.get("specs") or {},
+                "variants": p.get("variants") or [],
+                "page_number": p.get("page_number", 0),
+                "image_url": p.get("image_url") or p.get("blob_url") or "",
+                "specs_preview": p.get("specs_preview", ""),
+            }
+            for p in (cat.get("products") or [])
+        ],
+    }
+
+
 @app.post("/api/upload-catalogue")
 @app.post("/api/upload-catalogues")
 async def upload_catalogues(files: List[UploadFile] = File(...)):

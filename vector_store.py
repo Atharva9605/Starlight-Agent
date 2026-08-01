@@ -227,9 +227,14 @@ def delete_by_source(source: str, organization_id: str | None = None) -> int:
                 )
                 deleted = cur.rowcount
             conn.commit()
-            return deleted
         finally:
             conn.close()
+        try:
+            from catalogue_library import delete_catalogue_by_source
+            delete_catalogue_by_source(source, organization_id)
+        except Exception:
+            log.exception("delete_catalogue_by_source failed for %s", source)
+        return deleted
 
     collection = _chroma_collection()
     try:
@@ -260,6 +265,11 @@ def clear_all(organization_id: str | None = None) -> None:
             conn.commit()
         finally:
             conn.close()
+        try:
+            from catalogue_library import clear_library
+            clear_library(organization_id)
+        except Exception:
+            log.exception("clear_library failed after clear_all")
         return
 
     import chromadb
@@ -345,7 +355,7 @@ def query(
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    SELECT document, metadata, (embedding <=> %s::vector) AS distance
+                    SELECT id, document, metadata, (embedding <=> %s::vector) AS distance
                     FROM catalogue_chunks
                     WHERE organization_id = %s{extra_sql}
                     ORDER BY embedding <=> %s::vector
@@ -358,12 +368,23 @@ def query(
             conn.close()
 
         if not rows:
-            return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+            return {
+                "ids": [[]],
+                "documents": [[]],
+                "metadatas": [[]],
+                "distances": [[]],
+            }
 
-        docs = [r[0] for r in rows]
-        metas = [r[1] if isinstance(r[1], dict) else json.loads(r[1]) for r in rows]
-        dists = [float(r[2]) for r in rows]
-        return {"documents": [docs], "metadatas": [metas], "distances": [dists]}
+        ids = [r[0] for r in rows]
+        docs = [r[1] for r in rows]
+        metas = [r[2] if isinstance(r[2], dict) else json.loads(r[2]) for r in rows]
+        dists = [float(r[3]) for r in rows]
+        return {
+            "ids": [ids],
+            "documents": [docs],
+            "metadatas": [metas],
+            "distances": [dists],
+        }
 
     # Dev-only Chroma path (blocked when SAAS_MODE=true via require_scoped_backend)
     collection = _chroma_collection()

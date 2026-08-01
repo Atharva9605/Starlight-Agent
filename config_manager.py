@@ -45,6 +45,7 @@ _TEMPLATE_VARIABLES = [
     {"name": "sender_email", "description": "Reply-to email"},
     {"name": "company_logo_url", "description": "Logo URL or cid:company_logo"},
     {"name": "referenced_products", "description": "List of product ref dicts (blob_url, product_name, …)"},
+    {"name": "catalogue_url", "description": "Public digital catalogue share link"},
     {"name": "catalog_chunks", "description": "Raw RAG text chunks"},
 ]
 
@@ -87,6 +88,7 @@ _SAMPLE_PREVIEW_DATA = {
             "specs_preview": "12W · 3000K · IP44 · 1200 lm/m",
         }
     ],
+    "catalogue_url": "http://localhost:5173/c/default/starlight-linear-catalogue",
     "catalog_chunks": [],
 }
 
