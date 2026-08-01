@@ -775,11 +775,17 @@ async def get_org_catalogue(catalogue_id: str):
 async def public_catalogue(org_slug: str, catalogue_slug: str):
     """Unauthenticated digital catalogue page data."""
     from catalogue_library import get_catalogue_by_slug
+    from catalogue_product_filter import is_catalogue_product, sanitize_product_for_public
 
     cat = get_catalogue_by_slug(org_slug, catalogue_slug, public_only=True)
     if not cat:
         raise HTTPException(status_code=404, detail="Catalogue not found")
-    # Strip internal ids that aren't needed publicly beyond product display
+
+    products = [
+        sanitize_product_for_public(p)
+        for p in (cat.get("products") or [])
+        if is_catalogue_product(p)
+    ]
     return {
         "id": cat["id"],
         "name": cat["name"],
@@ -788,23 +794,9 @@ async def public_catalogue(org_slug: str, catalogue_slug: str):
         "organization_name": cat.get("organization_name", ""),
         "cover_image_url": cat.get("cover_image_url", ""),
         "page_count": cat.get("page_count", 0),
-        "product_count": cat.get("product_count", 0),
+        "product_count": len(products),
         "share_url": cat.get("share_url", ""),
-        "products": [
-            {
-                "id": p["id"],
-                "product_name": p["product_name"],
-                "category": p["category"],
-                "description": p.get("description", ""),
-                "features": p.get("features") or [],
-                "specs": p.get("specs") or {},
-                "variants": p.get("variants") or [],
-                "page_number": p.get("page_number", 0),
-                "image_url": p.get("image_url") or p.get("blob_url") or "",
-                "specs_preview": p.get("specs_preview", ""),
-            }
-            for p in (cat.get("products") or [])
-        ],
+        "products": products,
     }
 
 

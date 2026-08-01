@@ -86,9 +86,12 @@ Guidelines:
 - Avoid inventing or assuming specifications not present in the image.
 - If a spec field is absent from the page, omit that key entirely.
 - Use the exact units shown for specifications (e.g. "12W", "220-240V AC").
+- Skip cover pages, contents/index pages, certificates (BIS / IS standards), \
+  warranty pages, and purely decorative pages — return [] for those.
+- Prefer real fixture / profile / accessory products with a model name or code.
 
 Return a JSON array (even for a single product). \
-If this is a cover, contents, or purely decorative page with no products, return [].
+If this is a cover, contents, certificate, or purely decorative page with no products, return [].
 Provide only the JSON array in your response without markdown fences or preamble.
 """
 
@@ -467,11 +470,15 @@ def ingest_catalogue(
             cover_image_url=cover or "",
         )
         if cat:
-            replace_products(cat["id"], all_library)
+            from catalogue_product_filter import is_catalogue_product
+
+            sellable = [p for p in all_library if is_catalogue_product(p)]
+            replace_products(cat["id"], sellable or all_library)
             log.info(
-                "Library: catalogue %s with %d products",
+                "Library: catalogue %s with %d products (%d filtered)",
                 cat["slug"],
-                len(all_library),
+                len(sellable or all_library),
+                len(all_library) - len(sellable),
             )
     except Exception:
         log.exception("Structured catalogue library write failed for %s", filename)

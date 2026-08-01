@@ -32,7 +32,9 @@ function ProductCard({
   onOpen: (p: DisplayProduct) => void
 }) {
   const initial = (product.name || 'P').slice(0, 1).toUpperCase()
-  const topSpecs = product.specs.filter((s) => s.key !== 'code').slice(0, 4)
+  const highlight = product.specs
+    .filter((s) => ['dimensions', 'wattage', 'ip_rating', 'voltage'].includes(s.key))
+    .slice(0, 3)
 
   return (
     <article className="pc-card">
@@ -62,10 +64,15 @@ function ProductCard({
 
         <h2 className="pc-title">{product.name}</h2>
 
-        {topSpecs.length ? (
-          <p className="pc-preview">
-            {topSpecs.map((s) => s.value).join(' · ')}
-          </p>
+        {highlight.length ? (
+          <dl className="pc-specs pc-specs-card">
+            {highlight.map((s) => (
+              <div key={s.key} className="pc-spec">
+                <dt>{s.label}</dt>
+                <dd>{s.value}</dd>
+              </div>
+            ))}
+          </dl>
         ) : null}
 
         <button type="button" className="pc-link" onClick={() => onOpen(product)}>
