@@ -3,7 +3,7 @@
  * clean fields suitable for a digital catalogue UI.
  */
 
-const EMPTY = /^(not stated|n\/a|na|none|unknown|-|—|–|\.?)$/i
+const EMPTY = /^(["']?(not stated|n\/a|na|none|unknown|-|—|–|\.?)["']?)$/i
 
 const SPEC_LABELS: Record<string, string> = {
   code: 'Code',
@@ -203,7 +203,7 @@ export function toDisplayProduct(p: {
     }
   }
   for (const [key, value] of Object.entries(merged)) {
-    if (seen.has(key) || key === 'applications' || key === 'notes') continue
+    if (seen.has(key) || key === 'applications' || key === 'notes' || key === 'anomaly') continue
     specs.push({
       key,
       label: SPEC_LABELS[key] || key.replace(/_/g, ' '),

@@ -607,7 +607,8 @@ def _display_name_from_filename(filename: str) -> str:
     return name.title() or "Catalogue"
 
 
-_EMPTY_SPEC = re.compile(r"^(not stated|n/?a|none|unknown|-|—|–|\.?)$", re.I)
+_EMPTY_SPEC = re.compile(r'^["\']?(not stated|n/?a|none|unknown|-|—|–|\.?)["\']?$', re.I)
+_SKIP_SPEC_KEYS = {"anomaly", "anomalies", "raw", "page_context"}
 
 
 def _unwrap_document(raw: str) -> str:
@@ -645,7 +646,7 @@ def _parse_pipe_product(document: str, meta: dict) -> dict[str, Any]:
             label, _, val = part.partition(":")
             key = re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
             val = val.strip()
-            if key and val and not _EMPTY_SPEC.match(val):
+            if key and val and not _EMPTY_SPEC.match(val) and key not in _SKIP_SPEC_KEYS:
                 specs[key] = val
             continue
         if i == 0 and (not name or "|" in name or name.startswith("[")):
