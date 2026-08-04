@@ -1763,9 +1763,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .pc-modal-preview {
   position: relative;
-  width: 100%;
+  width: 240px;
+  height: 240px;
+  max-width: 100%;
   aspect-ratio: 1 / 1;
-  height: auto;
+  align-self: center;
   border-radius: 14px;
   overflow: hidden;
   background: #0b1220;
