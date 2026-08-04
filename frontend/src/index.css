@@ -1706,8 +1706,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pc-modal-panel {
   position: relative;
   z-index: 1;
-  width: min(560px, 100%);
-  max-height: min(90vh, 860px);
+  width: min(560px, calc(100vw - 2rem));
+  height: min(560px, calc(100vw - 2rem), calc(100vh - 2rem));
+  max-height: min(560px, calc(100vh - 2rem));
+  aspect-ratio: 1 / 1;
   overflow: auto;
   background: #fff;
   border-radius: 18px;
