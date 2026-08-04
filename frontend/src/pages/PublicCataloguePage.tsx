@@ -97,7 +97,12 @@ function ProductModal({
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
   }, [onClose])
 
   return (
@@ -111,7 +116,9 @@ function ProductModal({
               {product.category ? (
                 <span className="pc-cat">{product.category.replace(/_/g, ' ')}</span>
               ) : null}
-              {product.pageNumber ? <span className="pc-page">Catalogue p. {product.pageNumber}</span> : null}
+              {product.pageNumber ? (
+                <span className="pc-page">p. {product.pageNumber}</span>
+              ) : null}
             </div>
             <h2>{product.name}</h2>
             {product.description ? <p className="pc-modal-tagline">{product.description}</p> : null}
@@ -121,49 +128,39 @@ function ProductModal({
           </button>
         </header>
 
-        <div className="pc-modal-grid">
-          <div className="pc-modal-media">
-            {product.imageUrl ? (
-              <img src={product.imageUrl} alt={`${product.name} catalogue page`} />
-            ) : (
-              <div className="pc-monogram" style={{ minHeight: 320 }}>
-                {(product.name || 'P').slice(0, 1)}
-              </div>
-            )}
-          </div>
+        <div className="pc-modal-body">
+          {product.imageUrl ? (
+            <div className="pc-modal-hero" aria-hidden>
+              <img src={product.imageUrl} alt="" />
+            </div>
+          ) : null}
 
-          <aside className="pc-modal-info">
+          <section className="pc-modal-section">
             <h3 className="pc-aside-label">Specifications</h3>
             {product.specs.length ? (
-              <dl className="pc-specs pc-specs-modal">
+              <div className="pc-spec-grid">
                 {product.specs.map((s) => (
-                  <div key={s.key} className="pc-spec">
-                    <dt>{s.label}</dt>
-                    <dd>{s.value}</dd>
+                  <div key={s.key} className="pc-spec-tile">
+                    <span className="pc-spec-tile-label">{s.label}</span>
+                    <span className="pc-spec-tile-value">{s.value}</span>
                   </div>
                 ))}
-              </dl>
+              </div>
             ) : (
-              <p className="pc-status">No structured specs for this product yet.</p>
+              <p className="pc-status">Specifications will appear after the next catalogue ingest.</p>
             )}
+          </section>
 
-            {features.length ? (
-              <>
-                <h3 className="pc-aside-label">Highlights</h3>
-                <ul className="pc-features">
-                  {features.map((f) => (
-                    <li key={f}>{f}</li>
-                  ))}
-                </ul>
-              </>
-            ) : null}
-
-            {product.imageUrl ? (
-              <a className="pc-btn" href={product.imageUrl} target="_blank" rel="noreferrer">
-                Open full catalogue page
-              </a>
-            ) : null}
-          </aside>
+          {features.length ? (
+            <section className="pc-modal-section">
+              <h3 className="pc-aside-label">Highlights</h3>
+              <ul className="pc-features">
+                {features.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </div>
       </div>
     </div>
