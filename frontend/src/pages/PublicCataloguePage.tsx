@@ -117,7 +117,7 @@ function ProductModal({
                 <span className="pc-cat">{product.category.replace(/_/g, ' ')}</span>
               ) : null}
               {product.pageNumber ? (
-                <span className="pc-page">p. {product.pageNumber}</span>
+                <span className="pc-page-chip">Catalogue p. {product.pageNumber}</span>
               ) : null}
             </div>
             <h2>{product.name}</h2>
@@ -128,39 +128,53 @@ function ProductModal({
           </button>
         </header>
 
-        <div className="pc-modal-body">
-          {product.imageUrl ? (
-            <div className="pc-modal-hero" aria-hidden>
-              <img src={product.imageUrl} alt="" />
-            </div>
-          ) : null}
+        <div className="pc-modal-grid">
+          <div className="pc-modal-media">
+            {product.imageUrl ? (
+              <img
+                src={product.imageUrl}
+                alt={`${product.name} catalogue page`}
+              />
+            ) : (
+              <div className="pc-monogram" style={{ minHeight: 280 }}>
+                {(product.name || 'P').slice(0, 1)}
+              </div>
+            )}
+          </div>
 
-          <section className="pc-modal-section">
+          <aside className="pc-modal-info">
             <h3 className="pc-aside-label">Specifications</h3>
             {product.specs.length ? (
-              <div className="pc-spec-grid">
+              <dl className="pc-specs pc-specs-modal">
                 {product.specs.map((s) => (
-                  <div key={s.key} className="pc-spec-tile">
-                    <span className="pc-spec-tile-label">{s.label}</span>
-                    <span className="pc-spec-tile-value">{s.value}</span>
+                  <div key={s.key} className="pc-spec">
+                    <dt>{s.label}</dt>
+                    <dd>{s.value}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>
             ) : (
-              <p className="pc-status">Specifications will appear after the next catalogue ingest.</p>
+              <p className="pc-status">No structured specs for this product yet.</p>
             )}
-          </section>
 
-          {features.length ? (
-            <section className="pc-modal-section">
-              <h3 className="pc-aside-label">Highlights</h3>
-              <ul className="pc-features">
-                {features.map((f) => (
-                  <li key={f}>{f}</li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
+            {features.length ? (
+              <>
+                <h3 className="pc-aside-label">Highlights</h3>
+                <ul className="pc-features">
+                  {features.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+
+            {product.imageUrl ? (
+              <a className="pc-btn" href={product.imageUrl} target="_blank" rel="noreferrer">
+                Open full catalogue page
+                {product.pageNumber ? ` (p. ${product.pageNumber})` : ''}
+              </a>
+            ) : null}
+          </aside>
         </div>
       </div>
     </div>
