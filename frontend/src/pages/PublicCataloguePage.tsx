@@ -109,31 +109,32 @@ function ProductModal({
     <div className="pc-modal" role="dialog" aria-modal="true" aria-label={product.name}>
       <button type="button" className="pc-modal-backdrop" aria-label="Close" onClick={onClose} />
       <div className="pc-modal-panel">
-        <header className="pc-modal-head">
-          <div className="pc-modal-titleblock">
-            <div className="pc-meta-row">
-              {product.code ? <span className="pc-code">{product.code}</span> : null}
-              {product.category ? (
-                <span className="pc-cat">{product.category.replace(/_/g, ' ')}</span>
-              ) : null}
-              {product.pageNumber ? (
-                <span className="pc-page-chip">p. {product.pageNumber}</span>
-              ) : null}
-            </div>
-            <h2>{product.name}</h2>
-            {product.description ? <p className="pc-modal-tagline">{product.description}</p> : null}
+        <button type="button" className="pc-modal-close" onClick={onClose}>
+          Close
+        </button>
+
+        {product.imageUrl ? (
+          <div className="pc-modal-preview">
+            <img src={product.imageUrl} alt="" />
           </div>
-          <button type="button" className="pc-modal-close" onClick={onClose}>
-            Close
-          </button>
-        </header>
+        ) : (
+          <div className="pc-modal-preview is-empty" aria-hidden>
+            <span className="pc-monogram">{(product.name || 'P').slice(0, 1)}</span>
+          </div>
+        )}
 
         <div className="pc-modal-body">
-          {product.imageUrl ? (
-            <div className="pc-modal-preview">
-              <img src={product.imageUrl} alt="" />
-            </div>
-          ) : null}
+          <div className="pc-meta-row">
+            {product.code ? <span className="pc-code">{product.code}</span> : null}
+            {product.category ? (
+              <span className="pc-cat">{product.category.replace(/_/g, ' ')}</span>
+            ) : null}
+            {product.pageNumber ? (
+              <span className="pc-page-chip">p. {product.pageNumber}</span>
+            ) : null}
+          </div>
+          <h2>{product.name}</h2>
+          {product.description ? <p className="pc-modal-tagline">{product.description}</p> : null}
 
           <section className="pc-modal-section">
             <h3 className="pc-aside-label">Specifications</h3>
