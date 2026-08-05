@@ -1736,7 +1736,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: relative;
   min-width: 0;
   min-height: 0;
-  background: #0b1220;
+  background: #fff;
   overflow: hidden;
 }
 .pc-modal-preview.is-empty {
