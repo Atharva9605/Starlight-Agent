@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import { CampaignProvider } from './campaign/CampaignContext'
 import { AppShell } from './components/AppShell'
 import { LoginPage, SignupPage } from './pages/AuthPages'
+import { PrivacyPolicyPage, TermsOfServicePage } from './pages/LegalPages'
 import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { ThreadPage } from './pages/ThreadPage'
@@ -36,6 +37,8 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
+            <Route path="/privacy" element={<PrivacyPolicyPage />} />
+            <Route path="/terms" element={<TermsOfServicePage />} />
             <Route path="/c/:orgSlug/:catalogueSlug" element={<PublicCataloguePage />} />
             <Route
               path="/"

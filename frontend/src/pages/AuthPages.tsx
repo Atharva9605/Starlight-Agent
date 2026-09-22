@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { api, getApiBase } from '../api/client'
+import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
 function AuthArt() {
@@ -154,8 +154,10 @@ export function LoginPage() {
             New to Starlight?{' '}
             <Link to="/signup" style={{ color: 'var(--blue)', fontWeight: 700 }}>Create account</Link>
           </div>
-          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-            API: {getApiBase() || '(same origin)'}
+          <p className="auth-legal muted">
+            <Link to="/privacy">Privacy Policy</Link>
+            <span aria-hidden> · </span>
+            <Link to="/terms">Terms of Service</Link>
           </p>
         </form>
       </div>
@@ -272,6 +274,12 @@ export function SignupPage() {
             Already have access?{' '}
             <Link to="/login" style={{ color: 'var(--blue)', fontWeight: 700 }}>Sign in</Link>
           </div>
+          <p className="auth-legal muted">
+            By continuing you agree to our{' '}
+            <Link to="/terms">Terms</Link>
+            {' '}and{' '}
+            <Link to="/privacy">Privacy Policy</Link>.
+          </p>
         </form>
       </div>
     </div>

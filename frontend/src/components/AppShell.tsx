@@ -93,6 +93,11 @@ export function AppShell() {
             </div>
           </div>
           <button className="btn secondary" onClick={logout}>Sign out</button>
+          <div className="sidebar-legal muted">
+            <NavLink to="/privacy">Privacy</NavLink>
+            <span aria-hidden> · </span>
+            <NavLink to="/terms">Terms</NavLink>
+          </div>
         </div>
       </aside>
       <main className="main">
