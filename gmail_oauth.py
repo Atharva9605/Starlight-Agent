@@ -67,8 +67,8 @@ def _flow() -> Flow:
     )
 
 
-def _authorization_url(state: str) -> str:
-    """Build consent URL. No hd= — any Google account is allowed."""
+def _authorization_url(state: str) -> tuple[str, str]:
+    """Build consent URL. Returns (url, code_verifier) — verifier must be reused on token exchange."""
     flow = _flow()
     url, _ = flow.authorization_url(
         access_type="offline",
@@ -76,7 +76,8 @@ def _authorization_url(state: str) -> str:
         state=state,
         # Do not pass include_granted_scopes — it causes intermittent scope mismatches.
     )
-    return url
+    # google-auth-oauthlib enables PKCE by default; store verifier for fetch_token.
+    return url, flow.code_verifier or ""
 
 
 def get_authorize_url(organization_id: str) -> dict:
@@ -89,12 +90,14 @@ def get_authorize_url(organization_id: str) -> dict:
         }
     _purge_expired_states()
     state = secrets.token_urlsafe(24)
+    url, code_verifier = _authorization_url(state)
     _pending_states[state] = {
         "purpose": "connect",
         "org_id": organization_id,
         "created_at": time.time(),
+        "code_verifier": code_verifier,
     }
-    return {"configured": True, "url": _authorization_url(state), "state": state}
+    return {"configured": True, "url": url, "state": state}
 
 
 def get_login_authorize_url() -> dict:
@@ -107,12 +110,14 @@ def get_login_authorize_url() -> dict:
         }
     _purge_expired_states()
     state = secrets.token_urlsafe(24)
+    url, code_verifier = _authorization_url(state)
     _pending_states[state] = {
         "purpose": "login",
         "org_id": None,
         "created_at": time.time(),
+        "code_verifier": code_verifier,
     }
-    return {"configured": True, "url": _authorization_url(state), "state": state}
+    return {"configured": True, "url": url, "state": state}
 
 
 def _token_payload(creds) -> dict:
@@ -170,6 +175,8 @@ def handle_oauth_callback(code: str, state: str) -> dict:
         raise ValueError("Invalid or expired OAuth state — please try again.")
 
     flow = _flow()
+    # Must match the code_challenge sent in authorization_url (PKCE).
+    flow.code_verifier = meta.get("code_verifier") or None
     flow.fetch_token(code=code)
     creds = flow.credentials
     email, name = _profile_from_creds(creds)
