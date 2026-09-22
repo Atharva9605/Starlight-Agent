@@ -127,8 +127,8 @@ export function AppShell() {
         <div className="brand-block">
           <div className="brand-mark">S</div>
           <div className="brand-copy">
-            <div className="brand"><span>Starlight</span></div>
-            <div className="brand-sub">AI Mailer</div>
+            <div className="brand"><span>Starlight AI Mailer</span></div>
+            <div className="brand-sub">Linear LED</div>
           </div>
         </div>
 

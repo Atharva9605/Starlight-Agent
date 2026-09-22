@@ -116,6 +116,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .sidebar .brand {
   color: #f8fafc;
+  font-size: 0.98rem;
 }
 
 .brand span {
@@ -499,33 +500,122 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .auth-art {
   position: relative;
   overflow: hidden;
-  padding: 2.5rem;
+  padding: 2.75rem 2.5rem;
   color: white;
+  display: flex;
+  align-items: center;
   background:
-    linear-gradient(145deg, rgba(29,78,216,0.92), rgba(8,145,178,0.88) 45%, rgba(217,119,6,0.85)),
-    url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.08'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    radial-gradient(ellipse 80% 60% at 10% 20%, rgba(255,255,255,0.18), transparent 55%),
+    linear-gradient(155deg, #0c4a6e 0%, #1d4ed8 42%, #0e7490 72%, #b45309 100%);
+}
+.auth-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, transparent 55%, rgba(15, 23, 42, 0.25)),
+    url("data:image/svg+xml,%3Csvg width='72' height='72' viewBox='0 0 72 72' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.07'%3E%3Cpath d='M0 36h72M36 0v72'/%3E%3C/g%3E%3C/svg%3E");
+  pointer-events: none;
+}
+.auth-art-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 34rem;
+}
+.auth-product-name {
+  font-family: var(--display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+  line-height: 1.2;
+}
+.auth-company {
+  margin-top: 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  letter-spacing: 0.02em;
 }
 .auth-art h1 {
   font-family: var(--display);
-  font-size: clamp(2rem, 3vw, 3rem);
-  margin: 0 0 0.75rem;
+  font-size: clamp(1.85rem, 3.2vw, 2.65rem);
+  margin: 0 0 0.85rem;
   letter-spacing: -0.03em;
-  max-width: 12ch;
+  max-width: 16ch;
+  line-height: 1.15;
+  color: white;
 }
-.auth-art p { max-width: 36ch; opacity: 0.92; line-height: 1.55; }
+.auth-purpose {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 1.02rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.92);
+}
+.auth-purpose-list {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.auth-purpose-list li {
+  position: relative;
+  padding: 0.7rem 0.9rem 0.7rem 2.35rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.92rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(6px);
+}
+.auth-purpose-list li::before {
+  content: '';
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: #fbbf24;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.25);
+}
 .auth-form-wrap {
   display: grid;
   place-items: center;
   padding: 2rem;
+  background: #f1f5f9;
 }
 .auth-card {
   width: min(420px, 100%);
   background: white;
   border: 1px solid var(--border);
-  border-radius: 24px;
-  padding: 1.6rem;
+  border-radius: 20px;
+  padding: 1.75rem;
   box-shadow: var(--shadow-lg);
   animation: riseIn 420ms ease;
+}
+.auth-card-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.auth-card-brand .brand-mark {
+  width: 42px;
+  height: 42px;
+  font-size: 1.05rem;
+}
+.auth-card-product {
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.2;
 }
 
 .terminal {
@@ -1159,25 +1249,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.75rem;
 }
 .auth-art-brand .brand-mark {
   width: 48px;
   height: 48px;
   font-size: 1.2rem;
-}
-.auth-art h1 {
-  margin: 0;
-  font-family: var(--display);
-  font-size: clamp(1.8rem, 3vw, 2.4rem);
-  letter-spacing: -0.03em;
-  color: white;
-}
-.auth-art p {
-  margin: 0.75rem 0 0;
-  max-width: 36ch;
-  color: rgba(255, 255, 255, 0.88);
-  line-height: 1.5;
+  flex-shrink: 0;
 }
 
 .review-side {

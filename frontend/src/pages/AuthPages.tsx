@@ -3,25 +3,34 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
+/** Exact product name — must match Google OAuth consent screen app name. */
+const APP_NAME = 'Starlight AI Mailer'
+const COMPANY = 'Starlight Linear LED'
+
 function AuthArt() {
   return (
     <div className="auth-art">
-      <div style={{ position: 'relative', zIndex: 1, marginTop: '14vh' }}>
+      <div className="auth-art-inner">
         <div className="auth-art-brand">
           <div className="brand-mark">S</div>
           <div>
-            <div className="brand" style={{ color: 'white', fontSize: '1.35rem' }}>
-              <span style={{ color: 'white', WebkitTextFillColor: 'white' }}>Starlight</span>
-            </div>
-            <div style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13, fontWeight: 600 }}>
-              Linear LED · AI Mailer
-            </div>
+            <div className="auth-product-name">{APP_NAME}</div>
+            <div className="auth-company">by {COMPANY}</div>
           </div>
         </div>
-        <h1>Light up every conversation</h1>
-        <p>
-          Sign in with any Google account — campaigns send from the inbox you authenticate with.
+
+        <h1>AI email outreach for LED sales teams</h1>
+        <p className="auth-purpose">
+          {APP_NAME} helps {COMPANY} draft, review, and send personalized sales emails from your
+          connected Gmail inbox — using your product catalogues, AI writing, and reply approvals in
+          one workspace.
         </p>
+
+        <ul className="auth-purpose-list">
+          <li>Connect any Google account and send from that inbox</li>
+          <li>Generate catalogue-aware campaign emails with live preview</li>
+          <li>Approve AI reply drafts before they go out</li>
+        </ul>
       </div>
     </div>
   )
@@ -98,13 +107,12 @@ export function LoginPage() {
       <AuthArt />
       <div className="auth-form-wrap">
         <form className="auth-card stack" onSubmit={onSubmit}>
-          <div>
-            <h1 style={{ margin: 0, fontFamily: 'var(--display)', fontSize: '1.55rem', letterSpacing: '-0.02em' }}>
-              Sign in
-            </h1>
-            <p className="muted" style={{ margin: '0.4rem 0 0' }}>
-              Any Google account — mail sends from that inbox
-            </p>
+          <div className="auth-card-brand">
+            <div className="brand-mark">S</div>
+            <div>
+              <div className="auth-card-product">{APP_NAME}</div>
+              <div className="muted" style={{ margin: 0, fontSize: 13 }}>Sign in to continue</div>
+            </div>
           </div>
 
           <button
@@ -151,7 +159,7 @@ export function LoginPage() {
             {loading ? 'Signing in…' : 'Continue'}
           </button>
           <div className="muted">
-            New to Starlight?{' '}
+            New to {APP_NAME}?{' '}
             <Link to="/signup" style={{ color: 'var(--blue)', fontWeight: 700 }}>Create account</Link>
           </div>
           <p className="auth-legal muted">
@@ -168,7 +176,7 @@ export function LoginPage() {
 export function SignupPage() {
   const { setToken } = useAuth()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ email: '', password: '', name: '', org_name: 'Starlight Linear LED' })
+  const [form, setForm] = useState({ email: '', password: '', name: '', org_name: COMPANY })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
@@ -178,7 +186,7 @@ export function SignupPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.signup({ ...form, org_name: form.org_name || 'Starlight Linear LED' })
+      const res = await api.signup({ ...form, org_name: form.org_name || COMPANY })
       setToken(res.token)
       navigate('/inbox')
     } catch (err: any) {
@@ -210,11 +218,12 @@ export function SignupPage() {
       <AuthArt />
       <div className="auth-form-wrap">
         <form className="auth-card stack" onSubmit={onSubmit}>
-          <div>
-            <h1 style={{ margin: 0, fontFamily: 'var(--display)', fontSize: '1.55rem', letterSpacing: '-0.02em' }}>
-              Create account
-            </h1>
-            <p className="muted" style={{ margin: '0.4rem 0 0' }}>Your AI CRM for LED outreach & replies</p>
+          <div className="auth-card-brand">
+            <div className="brand-mark">S</div>
+            <div>
+              <div className="auth-card-product">{APP_NAME}</div>
+              <div className="muted" style={{ margin: 0, fontSize: 13 }}>Create your workspace</div>
+            </div>
           </div>
 
           <button

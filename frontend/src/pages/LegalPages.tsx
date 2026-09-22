@@ -23,8 +23,8 @@ function LegalShell({
         <Link to="/login" className="legal-brand">
           <div className="brand-mark">S</div>
           <div>
-            <div className="brand"><span>Starlight</span></div>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>AI Mailer · Linear LED</div>
+            <div className="brand"><span>Starlight AI Mailer</span></div>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>Linear LED</div>
           </div>
         </Link>
         <nav className="legal-tabs">
