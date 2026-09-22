@@ -6,12 +6,12 @@ const STAGE_ORDER = ['queued', 'scrape', 'analyze', 'retrieve', 'draft', 'render
 
 const STAGE_LABELS: Record<string, string> = {
   queued: 'Queued',
-  scrape: 'Scrape website',
-  analyze: 'Analyze company',
-  retrieve: 'Match catalogue',
-  draft: 'Write email',
-  render: 'Render preview',
-  send: 'Send via Gmail',
+  scrape: 'Scrape',
+  analyze: 'Analyze',
+  retrieve: 'Catalogue',
+  draft: 'Draft',
+  render: 'Preview',
+  send: 'Send',
   error: 'Failed',
 }
 
@@ -32,7 +32,7 @@ function mergeTimeline(events: StageEvent[] | undefined): { id: string; label: s
   return rows
 }
 
-/** Autosend live monitor — live preview + per-email progress timeline. */
+/** Progress dashboard — live preview + per-email pipeline (autosend). */
 export function CampaignLivePage() {
   const nav = useNavigate()
   const {
@@ -55,7 +55,7 @@ export function CampaignLivePage() {
   }
 
   const running = status === 'running'
-  const pct = counts.total ? Math.round((counts.processed / counts.total) * 100) : 0
+  const pct = counts.progressPct
 
   const activeIdx = leads.findIndex((l) => {
     const s = leadState(l)
@@ -70,24 +70,30 @@ export function CampaignLivePage() {
   const previewHtml = livePreview?.html || focus?._preview_html || ''
   const previewSubject = livePreview?.subject || focus?._subject || 'Starlight outreach'
   const fromLabel = livePreview?.from || runSender || 'Starlight Linear LED'
+  const productSheet = livePreview?.productSheet || focus?._product_sheet || ''
+  const productCount = livePreview?.productCount ?? focus?._product_count ?? 0
+  const activeStep = timeline.find((s) => s.state === 'active') || timeline.find((s) => s.state === 'pending')
 
   return (
-    <div className="live-screen">
-      <div className="page-hero">
+    <div className="dash-screen">
+      <header className="dash-hero">
         <div>
-          <h1>
+          <div className="dash-kicker">
             {running ? <span className="live-dot" /> : null}
+            Campaign progress dashboard
+          </div>
+          <h1>
             {running
-              ? 'Live generation'
+              ? `Working lead ${(focusIdx || 0) + 1} of ${counts.total}`
               : status === 'done'
                 ? 'Campaign complete'
                 : status === 'stopped'
-                  ? 'Stopped'
-                  : 'Autosend'}
+                  ? 'Campaign stopped'
+                  : 'Autosend dashboard'}
           </h1>
-          <p>
-            {counts.sent} sent · {counts.failed} failed · {counts.total} total
-            {runSender ? ` · sending as ${runSender}` : ''}
+          <p className="muted">
+            {counts.sent} sent · {counts.failed} failed · {counts.processing} in progress
+            {runSender ? ` · from ${runSender}` : ''}
           </p>
         </div>
         <div className="row">
@@ -109,34 +115,56 @@ export function CampaignLivePage() {
             </>
           )}
         </div>
-      </div>
+      </header>
 
-      <div className="panel progress-panel">
+      <div className="dash-progress panel">
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-          <strong>{counts.processed} of {counts.total} leads</strong>
-          <span className="muted">{pct}%</span>
+          <div>
+            <strong style={{ fontSize: 15 }}>{pct}% complete</strong>
+            <span className="muted" style={{ marginLeft: 10, fontSize: 13 }}>
+              {counts.processed} finished · {Math.max(0, counts.total - counts.processed - counts.processing)} waiting
+            </span>
+          </div>
+          {activeStep ? (
+            <span className="pill warn">{activeStep.label}</span>
+          ) : null}
         </div>
-        <div className="progress">
+        <div className="progress thick">
           <div className={`progress-fill${running ? ' animated' : ''}`} style={{ width: `${pct}%` }} />
         </div>
+        <ol className="dash-rail">
+          {timeline.filter((s) => s.id !== 'error').map((step) => (
+            <li key={step.id} className={`dash-rail-step ${step.state}`}>
+              <span className="dash-rail-dot" />
+              <span className="dash-rail-label">{STAGE_LABELS[step.id] || step.id}</span>
+            </li>
+          ))}
+        </ol>
       </div>
 
-      <div className="live-dashboard">
-        <section className="live-preview-pane panel stack">
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+      <div className="dash-grid">
+        <section className="dash-preview panel stack">
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <div className="design-preview-label muted">Live customer preview</div>
-              <h2 style={{ margin: '0.15rem 0 0', fontFamily: 'var(--display)', fontSize: '1.2rem' }}>
-                {focus?.website || focus?.company || `Lead ${(focusIdx || 0) + 1}`}
+              <div className="design-preview-label muted">Live email preview</div>
+              <h2 style={{ margin: '0.2rem 0 0', fontFamily: 'var(--display)', fontSize: '1.25rem' }}>
+                {focus?.company || focus?.website || `Lead ${(focusIdx || 0) + 1}`}
               </h2>
+              {focus?.website && focus?.company ? (
+                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: 13 }}>{focus.website}</p>
+              ) : null}
             </div>
-            <span className={`pill ${focusState === 'sent' ? 'ok' : focusState === 'failed' ? 'pink' : 'warn'}`}>
-              {focus?._status || 'Queued'}
-            </span>
+            <div className="row" style={{ gap: 6 }}>
+              {productSheet ? <span className="pill ok">PDF sheet attached</span> : null}
+              {productCount ? <span className="pill">{productCount} products</span> : null}
+              <span className={`pill ${focusState === 'sent' ? 'ok' : focusState === 'failed' ? 'pink' : 'warn'}`}>
+                {focus?._status || 'Queued'}
+              </span>
+            </div>
           </div>
 
           {previewHtml ? (
-            <div className="live-preview-frame">
+            <div className="dash-preview-frame">
               <EmailPreviewFrame
                 html={previewHtml}
                 subject={previewSubject}
@@ -147,31 +175,28 @@ export function CampaignLivePage() {
           ) : (
             <div className="skeleton-frame tall live-preview-empty">
               <div className="live-pulse-ring" />
-              <strong>{running ? 'Generating this email…' : 'Preview appears as each email is written'}</strong>
-              <p className="muted" style={{ margin: '0.4rem 0 0', maxWidth: '36ch' }}>
-                Scraping, catalogue match, and GPT drafting stream into this pane the moment HTML is ready.
+              <strong>{running ? 'Generating this email…' : 'Preview appears here as each email is written'}</strong>
+              <p className="muted" style={{ margin: '0.4rem 0 0', maxWidth: '40ch' }}>
+                This is the campaign progress dashboard — open it anytime from Campaigns → Resume while a run is live.
               </p>
             </div>
           )}
         </section>
 
-        <aside className="live-side">
-          <div className="panel stack live-timeline-panel">
-            <strong style={{ fontFamily: 'var(--display)' }}>Generation timeline</strong>
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Per-email pipeline for lead {(focusIdx || 0) + 1}
-            </p>
-            <ol className="gen-timeline">
+        <aside className="dash-side">
+          <div className="panel stack">
+            <strong style={{ fontFamily: 'var(--display)' }}>This email</strong>
+            <ul className="dash-detail-list">
               {timeline.map((step) => (
-                <li key={step.id} className={`gen-step ${step.state}`}>
-                  <span className="gen-step-marker" aria-hidden />
-                  <div className="gen-step-body">
-                    <div className="gen-step-title">{step.label}</div>
-                    <div className="gen-step-meta muted">
+                <li key={step.id} className={`dash-detail ${step.state}`}>
+                  <span className="dash-detail-mark" />
+                  <div>
+                    <div className="dash-detail-title">{step.label}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>
                       {step.state === 'done'
-                        ? 'Complete'
+                        ? 'Done'
                         : step.state === 'active'
-                          ? 'In progress'
+                          ? 'Running now'
                           : step.state === 'error'
                             ? 'Error'
                             : 'Waiting'}
@@ -179,34 +204,35 @@ export function CampaignLivePage() {
                   </div>
                 </li>
               ))}
-            </ol>
-            <div className="stat-row" style={{ marginTop: 4 }}>
-              <div className="stat blue"><div className="label">Sent</div><div className="value">{counts.sent}</div></div>
-              <div className="stat amber"><div className="label">Failed</div><div className="value">{counts.failed}</div></div>
-              <div className="stat cyan"><div className="label">Left</div><div className="value">{Math.max(0, counts.total - counts.processed)}</div></div>
-            </div>
+            </ul>
           </div>
 
           <div className="panel stack">
             <strong style={{ fontFamily: 'var(--display)' }}>Lead queue</strong>
-            <div className="queue">
+            <div className="queue dash-queue">
               {leads.map((l, i) => {
                 const st = leadState(l)
                 return (
                   <div key={i} className={`queue-row${i === focusIdx ? ' active' : ''}`}>
                     <span className={`queue-index ${st}`}>{i + 1}</span>
                     <span className="queue-name">{l.website || l.company || `Lead ${i + 1}`}</span>
-                    <span className="pill">{l._status || 'Queued'}</span>
+                    <span className="pill">{st === 'pending' ? 'Queued' : (l._status || st)}</span>
                   </div>
                 )
               })}
             </div>
           </div>
 
+          <div className="stat-row dash-stats">
+            <div className="stat blue"><div className="label">Sent</div><div className="value">{counts.sent}</div></div>
+            <div className="stat amber"><div className="label">Failed</div><div className="value">{counts.failed}</div></div>
+            <div className="stat cyan"><div className="label">Left</div><div className="value">{Math.max(0, counts.total - counts.processed)}</div></div>
+          </div>
+
           {logs.length ? (
             <div className="panel stack">
-              <strong style={{ fontFamily: 'var(--display)' }}>Log</strong>
-              <pre className="terminal">{logs.slice(-40).join('\n')}</pre>
+              <strong style={{ fontFamily: 'var(--display)' }}>Activity</strong>
+              <pre className="terminal">{logs.slice(-30).join('\n')}</pre>
             </div>
           ) : null}
         </aside>

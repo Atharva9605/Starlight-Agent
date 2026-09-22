@@ -22,7 +22,10 @@ export type LivePreview = {
   website?: string
   to?: string
   from?: string
+  productCount?: number
+  productSheet?: string
 }
+
 
 export type Draft = {
   draftId: string
@@ -73,6 +76,7 @@ type CampaignValue = {
   recipientOverride: string
   senderEmail: string
   autosend: boolean
+  attachProductSheet: boolean
   status: RunStatus
   logs: string[]
   draft: Draft | null
@@ -84,12 +88,23 @@ type CampaignValue = {
   livePreview: LivePreview | null
   stagesByLead: Record<number, StageEvent[]>
   runSender: string
-  counts: { total: number; sent: number; failed: number; pending: number; processed: number; skipped: number }
+  counts: {
+    total: number
+    sent: number
+    failed: number
+    pending: number
+    processed: number
+    skipped: number
+    ready: number
+    processing: number
+    progressPct: number
+  }
   setTemplate: (v: string) => void
   setDelay: (v: number) => void
   setRecipientOverride: (v: string) => void
   setSenderEmail: (v: string) => void
   setAutosend: (v: boolean) => void
+  setAttachProductSheet: (v: boolean) => void
   uploadLeads: (file: File) => Promise<void>
   removeLead: (index: number) => void
   clearLeads: () => void
@@ -111,6 +126,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const [recipientOverride, setRecipientOverride] = useState('')
   const [senderEmail, setSenderEmail] = useState('')
   const [autosend, setAutosend] = useState(false)
+  const [attachProductSheet, setAttachProductSheet] = useState(true)
   const [status, setStatus] = useState<RunStatus>('idle')
   const [logs, setLogs] = useState<string[]>([])
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -126,9 +142,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const abortRef = useRef<AbortController | null>(null)
   const stopReviewRef = useRef(false)
   const leadsRef = useRef<Lead[]>([])
-  const optsRef = useRef({ template, delay, recipientOverride, senderEmail, autosend })
+  const optsRef = useRef({ template, delay, recipientOverride, senderEmail, autosend, attachProductSheet })
   leadsRef.current = leads
-  optsRef.current = { template, delay, recipientOverride, senderEmail, autosend }
+  optsRef.current = { template, delay, recipientOverride, senderEmail, autosend, attachProductSheet }
+
 
   const uploadLeads = useCallback(async (file: File) => {
     const res = await api.uploadLeads(file)
@@ -213,6 +230,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         recipient_override: opts.recipientOverride,
         sender_email: opts.senderEmail,
         row_index: index,
+        attach_product_sheet: opts.attachProductSheet,
       })
       const d: Draft = {
         draftId: res.draft_id,
@@ -302,6 +320,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           delay: opts.delay,
           sender_email: opts.senderEmail,
           recipient_override: opts.recipientOverride,
+          attach_product_sheet: opts.attachProductSheet,
           autosend: true,
         }),
         signal: ctrl.signal,
@@ -353,13 +372,21 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
               website: evt.website,
               to: evt.to,
               from: evt.from,
+              productCount: evt.product_count,
+              productSheet: evt.product_sheet,
             }
             setLivePreview(preview)
             setCurrentIndex(evt.row_index)
             setLeads((prev) =>
               prev.map((l, i) =>
                 i === evt.row_index
-                  ? { ...l, _preview_html: preview.html, _subject: preview.subject }
+                  ? {
+                      ...l,
+                      _preview_html: preview.html,
+                      _subject: preview.subject,
+                      _product_sheet: preview.productSheet,
+                      _product_count: preview.productCount,
+                    }
                   : l,
               ),
             )
@@ -436,19 +463,29 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     let sent = 0
     let failed = 0
     let skipped = 0
+    let ready = 0
+    let processing = 0
     for (const l of leads) {
       const s = leadState(l)
       if (s === 'sent') sent += 1
       else if (s === 'failed') failed += 1
       else if (s === 'skipped') skipped += 1
+      else if (s === 'ready') ready += 1
+      else if (s === 'processing') processing += 1
     }
+    const finished = sent + failed + skipped
+    const progressed = finished + ready + processing * 0.55
+    const total = leads.length
     return {
-      total: leads.length,
+      total,
       sent,
       failed,
       skipped,
-      pending: leads.length - sent - failed - skipped,
-      processed: sent + failed + skipped,
+      ready,
+      processing,
+      pending: Math.max(0, total - finished - ready - processing),
+      processed: finished,
+      progressPct: total ? Math.min(100, Math.round((progressed / total) * 100)) : 0,
     }
   }, [leads])
 
@@ -460,6 +497,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     recipientOverride,
     senderEmail,
     autosend,
+    attachProductSheet,
     status,
     logs,
     draft,
@@ -477,6 +515,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setRecipientOverride,
     setSenderEmail,
     setAutosend,
+    setAttachProductSheet,
     uploadLeads,
     removeLead,
     clearLeads,

@@ -985,6 +985,7 @@ class ProcessRequest(BaseModel):
     template: str = "email_template.html"
     delay: int = 3
     autosend: bool = True
+    attach_product_sheet: bool = True
 
 
 class CampaignGenerateRequest(BaseModel):
@@ -993,6 +994,7 @@ class CampaignGenerateRequest(BaseModel):
     recipient_override: Optional[str] = ""
     sender_email: Optional[str] = ""
     row_index: int = 0
+    attach_product_sheet: bool = True
 
 
 class CampaignReviseRequest(BaseModel):
@@ -1020,7 +1022,12 @@ async def campaign_generate(req: CampaignGenerateRequest):
     scraped_data["website"] = website
 
     result = await run_in_thread(
-        generate_eml_from_record, scraped_data, req.row_index + 1, outdir, req.template
+        generate_eml_from_record,
+        scraped_data,
+        req.row_index + 1,
+        outdir,
+        req.template,
+        attach_product_sheet=req.attach_product_sheet,
     )
     if not result:
         raise HTTPException(status_code=500, detail="Email generation failed.")
@@ -1062,6 +1069,9 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "website": website,
         "company": company,
         "row_index": req.row_index,
+        "product_count": len((trace_info or {}).get("product_refs") or []),
+        "product_sheet": (trace_info or {}).get("product_sheet_name") or "",
+        "attached_product_sheet": bool((trace_info or {}).get("attached_product_sheet")),
     }
 
 
@@ -1225,18 +1235,29 @@ async def process_leads(req: ProcessRequest):
                 )
                 yield _stage(idx, "analyze", "Company analyzed", "done")
 
-                yield _stage(idx, "retrieve", "Matching catalogue products")
+                yield _stage(idx, "retrieve", "Matching catalogue & writing email")
                 yield _sse({"type": "log", "message": f"Generating EML for: {website}"})
-                yield _stage(idx, "retrieve", "Catalogue matches ready", "done")
-                yield _stage(idx, "draft", "Writing personalized email")
 
                 eml_path, trace_info = await run_in_thread(
-                    generate_eml_from_record, scraped_data, idx + 1, outdir, req.template
+                    generate_eml_from_record,
+                    scraped_data,
+                    idx + 1,
+                    outdir,
+                    req.template,
+                    attach_product_sheet=req.attach_product_sheet,
                 )
 
                 if not eml_path or not os.path.exists(eml_path):
                     raise Exception("EML generation failed.")
 
+                n_products = len((trace_info or {}).get("product_refs") or [])
+                yield _stage(
+                    idx,
+                    "retrieve",
+                    f"Matched {n_products} catalogue product{'s' if n_products != 1 else ''}",
+                    "done",
+                    product_count=n_products,
+                )
                 yield _stage(idx, "draft", "Draft written", "done")
                 yield _stage(idx, "render", "Rendering HTML preview")
 
@@ -1247,6 +1268,7 @@ async def process_leads(req: ProcessRequest):
                     with open(html_path, "r", encoding="utf-8") as f:
                         html_content = f.read()
 
+                sheet_name = (trace_info or {}).get("product_sheet_name") or ""
                 yield _stage(idx, "render", "Preview ready", "done")
                 yield _sse({
                     "type": "preview_html",
@@ -1257,6 +1279,9 @@ async def process_leads(req: ProcessRequest):
                     "website": website,
                     "to": str(scraped_data.get("emails", "")).split(",")[0].strip(),
                     "from": sender_from,
+                    "product_count": n_products,
+                    "product_sheet": sheet_name,
+                    "attached_product_sheet": bool((trace_info or {}).get("attached_product_sheet")),
                 })
 
                 yield _sse({

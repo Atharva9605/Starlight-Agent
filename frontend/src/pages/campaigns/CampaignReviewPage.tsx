@@ -111,20 +111,18 @@ export function CampaignReviewPage() {
             {generating && !draft ? (
               <div className="skeleton-frame tall live-preview-empty">
                 <div className="live-pulse-ring" />
-                <strong>Writing email for lead {currentIndex + 1}…</strong>
-                <ol className="gen-timeline" style={{ width: 'min(360px, 100%)', textAlign: 'left', marginTop: '1.25rem' }}>
-                  {[
-                    'Scraping website',
-                    'Analyzing company',
-                    'Matching catalogue',
-                    'Drafting personalized email',
-                    'Rendering preview',
-                  ].map((label, i) => (
-                    <li key={label} className={`gen-step ${i < 2 ? 'done' : i === 2 ? 'active' : 'pending'}`}>
-                      <span className="gen-step-marker" aria-hidden />
-                      <div className="gen-step-body">
-                        <div className="gen-step-title">{label}</div>
-                      </div>
+                <strong>Writing email for lead {currentIndex + 1} of {leads.length}</strong>
+                <p className="muted" style={{ margin: '0.35rem 0 0.75rem' }}>
+                  Progress for this lead — scrape, catalogue match, draft, then live preview.
+                </p>
+                <ol className="dash-rail" style={{ maxWidth: 520, margin: '0 auto' }}>
+                  {['Scrape', 'Analyze', 'Catalogue', 'Draft', 'Preview'].map((label, i) => (
+                    <li
+                      key={label}
+                      className={`dash-rail-step ${i < 2 ? 'done' : i === 2 ? 'active' : 'pending'}`}
+                    >
+                      <span className="dash-rail-dot" />
+                      <span className="dash-rail-label">{label}</span>
                     </li>
                   ))}
                 </ol>

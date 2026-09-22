@@ -306,6 +306,7 @@ export const api = {
     recipient_override?: string
     sender_email?: string
     row_index?: number
+    attach_product_sheet?: boolean
   }) =>
     request<{
       draft_id: string
@@ -316,6 +317,9 @@ export const api = {
       website: string
       company: string
       row_index: number
+      product_count?: number
+      product_sheet?: string
+      attached_product_sheet?: boolean
     }>('/api/campaign/generate', { method: 'POST', body: JSON.stringify(body) }),
   campaignRevise: (draftId: string, message: string) =>
     request<{

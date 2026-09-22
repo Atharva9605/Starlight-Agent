@@ -69,34 +69,61 @@ def build_eml_message(
     to_addr: str,
     logo_path: str = "",
     embed_logo: bool = True,
+    attachments: list[dict] | None = None,
 ) -> MIMEMultipart:
     """
     Build a mail-client-friendly message.
 
     Structure is multipart/related wrapping multipart/alternative so the inline
-    logo resolves against cid: references in the HTML. Building the .eml the
-    same way at generation and at send time keeps the delivered mail identical
-    to what was previewed.
+    logo resolves against cid: references in the HTML. Optional file attachments
+    wrap everything in multipart/mixed.
     """
+    from email import encoders
+    from email.mime.base import MIMEBase
+
     alternative = MIMEMultipart("alternative")
     alternative.attach(MIMEText(html_to_text(html), "plain", "utf-8"))
     alternative.attach(MIMEText(html, "html", "utf-8"))
 
-    root = MIMEMultipart("related")
-    root["Subject"] = subject
-    if from_addr:
-        root["From"] = from_addr
-    if to_addr:
-        root["To"] = to_addr
-    root.attach(alternative)
+    related = MIMEMultipart("related")
+    related.attach(alternative)
 
     references_cid = f"cid:{LOGO_CID}" in (html or "")
     if embed_logo and references_cid and logo_path and os.path.exists(logo_path):
         img = _logo_part(logo_path)
         if img is not None:
-            root.attach(img)
+            related.attach(img)
 
-    return root
+    files = [a for a in (attachments or []) if a.get("data") and a.get("filename")]
+    if not files:
+        related["Subject"] = subject
+        if from_addr:
+            related["From"] = from_addr
+        if to_addr:
+            related["To"] = to_addr
+        return related
+
+    mixed = MIMEMultipart("mixed")
+    mixed["Subject"] = subject
+    if from_addr:
+        mixed["From"] = from_addr
+    if to_addr:
+        mixed["To"] = to_addr
+    mixed.attach(related)
+
+    for att in files:
+        filename = str(att["filename"])
+        mime = str(att.get("mime_type") or "application/octet-stream")
+        maintype, _, subtype = mime.partition("/")
+        if not subtype:
+            maintype, subtype = "application", "octet-stream"
+        part = MIMEBase(maintype, subtype)
+        part.set_payload(att["data"])
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        mixed.attach(part)
+
+    return mixed
 
 
 def _logo_part(logo_path: str) -> MIMEImage | None:

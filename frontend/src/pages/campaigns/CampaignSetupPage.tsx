@@ -35,6 +35,8 @@ export function CampaignSetupPage() {
     setRecipientOverride,
     autosend,
     setAutosend,
+    attachProductSheet,
+    setAttachProductSheet,
     uploadLeads,
     removeLead,
     clearLeads,
@@ -103,15 +105,15 @@ export function CampaignSetupPage() {
         <div className="row">
           {inFlight ? (
             <button
-              className="btn secondary"
+              className="btn"
               type="button"
               onClick={() => nav(autosend ? '/campaigns/live' : '/campaigns/review')}
             >
-              Resume →
+              Open progress dashboard →
             </button>
           ) : null}
           <button
-            className="btn"
+            className="btn secondary"
             type="button"
             disabled={!leads.length || launching || inFlight}
             onClick={launch}
@@ -228,16 +230,34 @@ export function CampaignSetupPage() {
               <span>
                 <strong>Autosend</strong>
                 <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                  Skip review — scrape, write, and send every lead automatically.
+                  Skip review — scrape, write, and send every lead automatically. Opens the progress dashboard.
+                </span>
+              </span>
+            </label>
+
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={attachProductSheet}
+                onChange={(e) => setAttachProductSheet(e.target.checked)}
+              />
+              <span>
+                <strong>Attach product sheet PDF</strong>
+                <span className="muted" style={{ display: 'block', fontSize: 13 }}>
+                  Optional branded Starlight PDF of catalogue products suggested in the email.
                 </span>
               </span>
             </label>
 
             {!autosend ? (
               <div className="alert warn" style={{ margin: 0 }}>
-                You'll review each email full-screen and only send when you click Send.
+                You'll review each email full-screen. Progress for each lead shows while it generates.
               </div>
-            ) : null}
+            ) : (
+              <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
+                Progress dashboard opens at <strong>/campaigns/live</strong> with live preview and per-email timeline.
+              </div>
+            )}
 
             <label className="field">
               <span>Test inbox (optional)</span>

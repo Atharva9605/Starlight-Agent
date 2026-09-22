@@ -534,6 +534,7 @@ def generate_eml_from_record(
     template_name: str = "email_template.html",
     *,
     template_content: str | None = None,
+    attach_product_sheet: bool = True,
 ) -> tuple[str, dict] | None:
     """
     Generate a single .html + .eml email from a scraped client record.
@@ -543,6 +544,8 @@ def generate_eml_from_record(
     - `referenced_products` list passed to the template so it can render
       product cards with the catalogue page image (blob_url), product name,
       and specs preview.
+    - Optional branded PDF product sheet attached when attach_product_sheet
+      is True and product refs exist.
 
     Returns (eml_path, trace_info) on success, or None on failure.
     """
@@ -624,6 +627,12 @@ def generate_eml_from_record(
         "Would it be convenient to visit your studio with a sample kit, at a time that works for you?",
     )
 
+    catalogue_url = (
+        (rag_trace or {}).get("catalogue_url")
+        or ((product_refs or [{}])[0].get("catalogue_url") if product_refs else "")
+        or ""
+    )
+
     # Render template
     if template_content:
         env = Environment(loader=BaseLoader())
@@ -648,9 +657,7 @@ def generate_eml_from_record(
         company_logo_url=sender.get("company_logo_url", "cid:company_logo"),
         catalog_chunks=raw_docs,
         referenced_products=product_refs,
-        catalogue_url=(rag_trace or {}).get("catalogue_url")
-        or ((product_refs or [{}])[0].get("catalogue_url") if product_refs else "")
-        or "",
+        catalogue_url=catalogue_url,
     )
 
     # Inline the template's <style> rules before anything is stored, so the
@@ -664,6 +671,34 @@ def generate_eml_from_record(
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html_out)
 
+    attachments: list[dict] = []
+    product_sheet_path = ""
+    product_sheet_name = ""
+    if attach_product_sheet and product_refs:
+        try:
+            from product_sheet import build_product_sheet_pdf
+
+            pdf_bytes, pdf_name = build_product_sheet_pdf(
+                product_refs,
+                sender=sender,
+                client_company=str(rec.get("company") or "")[:80],
+                catalogue_url=str(catalogue_url or ""),
+            )
+            product_sheet_name = pdf_name
+            product_sheet_path = os.path.join(outdir, f"{idx}_{safe_name}_products.pdf")
+            with open(product_sheet_path, "wb") as pf:
+                pf.write(pdf_bytes)
+            attachments.append(
+                {
+                    "filename": pdf_name,
+                    "mime_type": "application/pdf",
+                    "data": pdf_bytes,
+                }
+            )
+            print(f"  ✓ Product sheet attached ({len(product_refs)} products)")
+        except Exception as exc:
+            print(f"  ⚠ Product sheet skipped: {exc}")
+
     msg = build_eml_message(
         subject=subject,
         html=html_out,
@@ -671,6 +706,7 @@ def generate_eml_from_record(
         to_addr=str(rec.get("emails", "")),
         logo_path=logo_path,
         embed_logo=sender.get("company_logo_url", "cid:company_logo") == "cid:company_logo",
+        attachments=attachments or None,
     )
 
     eml_path = os.path.join(outdir, f"{idx}_{safe_name}.eml")
@@ -692,6 +728,9 @@ def generate_eml_from_record(
         "to": msg["To"],
         "company": rec.get("company", ""),
         "website": rec.get("website", ""),
+        "product_sheet_path": product_sheet_path,
+        "product_sheet_name": product_sheet_name,
+        "attached_product_sheet": bool(product_sheet_path),
     }
     return eml_path, trace_info
 
