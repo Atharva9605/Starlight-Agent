@@ -718,6 +718,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   gap: 0.85rem;
   min-height: calc(100vh - 3rem);
 }
+.live-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
 .live-body {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
@@ -731,6 +739,51 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex;
   flex-direction: column;
 }
+.live-preview-pane {
+  min-height: calc(100vh - 14rem);
+  display: flex;
+  flex-direction: column;
+}
+.live-preview-frame {
+  flex: 1;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0f172a08;
+}
+.live-preview-frame .email-chrome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 0;
+  box-shadow: none;
+}
+.live-preview-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.35rem;
+  position: relative;
+}
+.live-pulse-ring {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 3px solid #bfdbfe;
+  border-top-color: var(--blue);
+  animation: spin 0.9s linear infinite;
+  margin-bottom: 0.75rem;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 .live-side {
   display: flex;
   flex-direction: column;
@@ -738,12 +791,115 @@ button, input, select, textarea { font: inherit; color: inherit; }
   min-height: 0;
 }
 .live-side .queue {
-  max-height: calc(100vh - 22rem);
+  max-height: calc(100vh - 28rem);
   overflow: auto;
 }
 .live-side .terminal {
-  max-height: 220px;
+  max-height: 180px;
   margin: 0;
+}
+.live-timeline-panel {
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 40%);
+}
+.gen-timeline {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+.gen-step {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  position: relative;
+}
+.gen-step:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 28px;
+  bottom: -2px;
+  width: 2px;
+  background: #e2e8f0;
+}
+.gen-step.done:not(:last-child)::before { background: #93c5fd; }
+.gen-step-marker {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #cbd5e1;
+  background: #fff;
+  margin-top: 2px;
+  position: relative;
+  z-index: 1;
+}
+.gen-step.done .gen-step-marker {
+  border-color: var(--blue);
+  background: var(--blue);
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+.gen-step.done .gen-step-marker::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.gen-step.active .gen-step-marker {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  animation: pulseSoft 1.4s ease-in-out infinite;
+}
+.gen-step.error .gen-step-marker {
+  border-color: #e11d48;
+  background: #fff1f2;
+}
+.gen-step-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.gen-step.pending .gen-step-title { color: #94a3b8; font-weight: 600; }
+.gen-step-meta { font-size: 12px; margin-top: 1px; }
+
+.btn.google {
+  background: #fff;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+}
+.btn.google:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
 }
 
 /* Settings / admin section nav reuse studio-nav-item as buttons */
@@ -893,8 +1049,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .skeleton-frame.tall { min-height: calc(100vh - 10rem); }
 
 @media (max-width: 1100px) {
-  .setup-grid, .review-body, .design-body, .studio-body, .live-body { grid-template-columns: 1fr; }
-  .review-mail, .design-mail, .live-focus { min-height: 55vh; }
+  .setup-grid, .review-body, .design-body, .studio-body, .live-body, .live-dashboard { grid-template-columns: 1fr; }
+  .review-mail, .design-mail, .live-focus, .live-preview-pane { min-height: 55vh; }
   .design-side { position: static; }
   .studio-nav { min-height: 0; }
   .studio-nav-list { max-height: 220px; }

@@ -91,6 +91,8 @@ PUBLIC_PATHS = {
     "/",
     "/api/auth/signup",
     "/api/auth/login",
+    "/api/auth/google/authorize",
+    "/api/auth/google/callback",
     "/api/integrations/gmail/callback",
     "/docs",
     "/openapi.json",

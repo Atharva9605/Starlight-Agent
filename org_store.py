@@ -338,6 +338,99 @@ def authenticate_user(email: str, password: str) -> Optional[dict]:
         conn.close()
 
 
+def get_or_create_google_user(email: str, name: str = "") -> dict:
+    """
+    Find or create a user for Sign in with Google.
+    New users get a personal org; password is a random unusable hash.
+    """
+    import secrets as _secrets
+
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("Valid Google email is required")
+    display = (name or "").strip() or email.split("@")[0]
+
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, email, name FROM users WHERE email = %s",
+                (email,),
+            )
+            row = cur.fetchone()
+            if row:
+                user_id, user_email, user_name = row
+                if display and display != user_name:
+                    cur.execute(
+                        "UPDATE users SET name = %s WHERE id = %s",
+                        (display, user_id),
+                    )
+                    user_name = display
+            else:
+                user_id = _new_id()
+                user_email = email
+                user_name = display
+                # Unusable password — account is Google-only unless they reset later.
+                cur.execute(
+                    "INSERT INTO users (id, email, password_hash, name) VALUES (%s, %s, %s, %s)",
+                    (user_id, email, hash_password(_secrets.token_urlsafe(48)), user_name),
+                )
+                org_id = _new_id("org_")
+                org_name = f"{user_name}'s workspace"
+                slug = slugify(org_name)
+                cur.execute("SELECT id FROM organizations WHERE slug = %s", (slug,))
+                if cur.fetchone():
+                    slug = f"{slug}-{uuid.uuid4().hex[:6]}"
+                cur.execute(
+                    "INSERT INTO organizations (id, name, slug) VALUES (%s, %s, %s)",
+                    (org_id, org_name, slug),
+                )
+                cur.execute(
+                    "INSERT INTO organization_members (organization_id, user_id, role) VALUES (%s, %s, 'owner')",
+                    (org_id, user_id),
+                )
+                defaults = _load_file_config()
+                cur.execute(
+                    "INSERT INTO organization_config (organization_id, config_json) VALUES (%s, %s::jsonb)",
+                    (org_id, json.dumps(defaults)),
+                )
+
+            cur.execute(
+                """
+                SELECT om.organization_id, om.role, o.name, o.slug
+                FROM organization_members om
+                JOIN organizations o ON o.id = om.organization_id
+                WHERE om.user_id = %s
+                ORDER BY om.created_at ASC
+                """,
+                (user_id,),
+            )
+            memberships = [
+                {
+                    "organization_id": r[0],
+                    "role": r[1],
+                    "name": r[2],
+                    "slug": r[3],
+                }
+                for r in cur.fetchall()
+            ]
+        conn.commit()
+        if not memberships:
+            raise ValueError("Google user has no organization membership")
+        primary = memberships[0]
+        return {
+            "user_id": user_id,
+            "email": user_email,
+            "name": user_name,
+            "organization_id": primary["organization_id"],
+            "organization_name": primary["name"],
+            "role": primary["role"],
+            "organizations": memberships,
+        }
+    finally:
+        conn.close()
+
+
 def get_user_by_id(user_id: str) -> Optional[dict]:
     conn = _pg_conn()
     try:

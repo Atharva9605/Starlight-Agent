@@ -7,6 +7,23 @@ export type RunStatus = 'idle' | 'running' | 'reviewing' | 'done' | 'stopped' | 
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string }
 
+export type StageEvent = {
+  stage: string
+  label: string
+  state: 'active' | 'done' | 'error' | string
+  at?: number
+}
+
+export type LivePreview = {
+  rowIndex: number
+  html: string
+  subject: string
+  company?: string
+  website?: string
+  to?: string
+  from?: string
+}
+
 export type Draft = {
   draftId: string
   rowIndex: number
@@ -64,6 +81,9 @@ type CampaignValue = {
   revising: boolean
   sending: boolean
   currentIndex: number
+  livePreview: LivePreview | null
+  stagesByLead: Record<number, StageEvent[]>
+  runSender: string
   counts: { total: number; sent: number; failed: number; pending: number; processed: number; skipped: number }
   setTemplate: (v: string) => void
   setDelay: (v: number) => void
@@ -99,6 +119,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const [revising, setRevising] = useState(false)
   const [sending, setSending] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [livePreview, setLivePreview] = useState<LivePreview | null>(null)
+  const [stagesByLead, setStagesByLead] = useState<Record<number, StageEvent[]>>({})
+  const [runSender, setRunSender] = useState('')
 
   const abortRef = useRef<AbortController | null>(null)
   const stopReviewRef = useRef(false)
@@ -130,12 +153,15 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setLogs([])
     setStatus('idle')
     setCurrentIndex(0)
+    setLivePreview(null)
+    setStagesByLead({})
+    setRunSender('')
   }, [])
 
   const reset = useCallback(() => {
     abortRef.current?.abort()
     stopReviewRef.current = true
-    setLeads((prev) => prev.map((l) => ({ ...l, _status: '' })))
+    setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
     setDraft(null)
     setChat([])
     setLogs([])
@@ -144,6 +170,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setGenerating(false)
     setRevising(false)
     setSending(false)
+    setLivePreview(null)
+    setStagesByLead({})
+    setRunSender('')
   }, [])
 
   const stop = useCallback(() => {
@@ -155,6 +184,17 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const setLeadStatus = (index: number, st: string) => {
     setLeads((prev) => prev.map((l, i) => (i === index ? { ...l, _status: st } : l)))
+  }
+
+  const pushStage = (index: number, evt: StageEvent) => {
+    setStagesByLead((prev) => {
+      const list = [...(prev[index] || [])]
+      const existing = list.findIndex((s) => s.stage === evt.stage)
+      const next = { ...evt, at: Date.now() }
+      if (existing >= 0) list[existing] = next
+      else list.push(next)
+      return { ...prev, [index]: list }
+    })
   }
 
   const generateAt = useCallback(async (index: number): Promise<Draft | null> => {
@@ -240,7 +280,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setStatus('running')
     setLogs([])
     setDraft(null)
-    setLeads((prev) => prev.map((l) => ({ ...l, _status: '' })))
+    setLivePreview(null)
+    setStagesByLead({})
+    setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
 
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -287,7 +329,41 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
             continue
           }
           if (evt.type === 'log') setLogs((prev) => [...prev, evt.message || String(evt)])
-          if (evt.type === 'status_update') setLeadStatus(evt.row_index, evt.status)
+          if (evt.type === 'run_meta') {
+            if (evt.sender_email) setRunSender(evt.sender_email)
+          }
+          if (evt.type === 'status_update') {
+            setLeadStatus(evt.row_index, evt.status)
+            setCurrentIndex(evt.row_index)
+          }
+          if (evt.type === 'stage') {
+            pushStage(evt.row_index, {
+              stage: evt.stage,
+              label: evt.label,
+              state: evt.state || 'active',
+            })
+            setCurrentIndex(evt.row_index)
+          }
+          if (evt.type === 'preview_html') {
+            const preview: LivePreview = {
+              rowIndex: evt.row_index,
+              html: evt.html || '',
+              subject: evt.subject || 'Starlight outreach',
+              company: evt.company,
+              website: evt.website,
+              to: evt.to,
+              from: evt.from,
+            }
+            setLivePreview(preview)
+            setCurrentIndex(evt.row_index)
+            setLeads((prev) =>
+              prev.map((l, i) =>
+                i === evt.row_index
+                  ? { ...l, _preview_html: preview.html, _subject: preview.subject }
+                  : l,
+              ),
+            )
+          }
           if (evt.type === 'done') setStatus('done')
         }
       }
@@ -392,6 +468,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     revising,
     sending,
     currentIndex,
+    livePreview,
+    stagesByLead,
+    runSender,
     counts,
     setTemplate,
     setDelay,

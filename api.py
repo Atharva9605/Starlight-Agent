@@ -223,6 +223,47 @@ async def login(body: LoginRequest, request: Request):
     }
 
 
+@app.get("/api/auth/google/authorize")
+async def google_login_authorize():
+    """Start Sign in with Google (any Google account). Also connects Gmail send."""
+    return gmail_oauth.get_login_authorize_url()
+
+
+@app.get("/api/auth/google/callback")
+@app.get("/api/integrations/gmail/callback")
+async def google_oauth_callback(code: str = "", state: str = "", error: str = ""):
+    """Unified OAuth callback for Sign in with Google and Connect Gmail."""
+    frontend = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+    purpose = gmail_oauth.pending_purpose(state) if state else None
+    err_dest = f"{frontend}/login" if purpose == "login" else f"{frontend}/settings"
+    if error:
+        return RedirectResponse(url=f"{err_dest}?google_error={error}")
+    if not code or not state:
+        return RedirectResponse(url=f"{err_dest}?google_error=missing_code")
+    try:
+        result = gmail_oauth.handle_oauth_callback(code, state)
+    except Exception as e:
+        msg = str(e)[:160]
+        return RedirectResponse(url=f"{err_dest}?google_error={msg}")
+
+    if result.get("purpose") == "login":
+        user = result["user"]
+        token = create_access_token(
+            user["user_id"],
+            user["email"],
+            user["name"],
+            user["organization_id"],
+            user["role"],
+        )
+        return RedirectResponse(
+            url=gmail_oauth.frontend_login_redirect(token, result.get("connected_email", ""))
+        )
+
+    return RedirectResponse(
+        url=f"{frontend}/settings?gmail_connected={result.get('connected_email', '')}"
+    )
+
+
 @app.get("/api/auth/me")
 async def auth_me():
     from tenant import get_tenant_context
@@ -296,20 +337,6 @@ async def org_add_member(body: AddOrgMemberRequest):
 async def gmail_authorize():
     org_id = get_organization_id()
     return gmail_oauth.get_authorize_url(org_id)
-
-
-@app.get("/api/integrations/gmail/callback")
-async def gmail_callback(code: str = "", state: str = "", error: str = ""):
-    frontend = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
-    if error:
-        return RedirectResponse(url=f"{frontend}/settings?gmail_error={error}")
-    try:
-        result = gmail_oauth.handle_oauth_callback(code, state)
-        return RedirectResponse(
-            url=f"{frontend}/settings?gmail_connected={result.get('connected_email', '')}"
-        )
-    except Exception as e:
-        return RedirectResponse(url=f"{frontend}/settings?gmail_error={str(e)[:100]}")
 
 
 @app.get("/api/integrations/gmail/status")
@@ -1142,51 +1169,105 @@ async def process_leads(req: ProcessRequest):
     When autosend=false, drafts are generated and emitted but not sent
     (prefer /api/campaign/generate for interactive review).
     """
+    def _sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
+    def _stage(idx: int, stage: str, label: str, state: str = "active", **extra) -> str:
+        return _sse({
+            "type": "stage",
+            "row_index": idx,
+            "stage": stage,
+            "label": label,
+            "state": state,
+            **extra,
+        })
+
     async def event_stream():
         org_id = get_organization_id()
         outdir = os.path.join("out_emails_api", org_id)
         os.makedirs(outdir, exist_ok=True)
-        
+
+        gmail_status = gmail_oauth.get_integration_status(org_id)
+        sender_from = gmail_status.get("email") or req.sender_email or ""
+        yield _sse({
+            "type": "run_meta",
+            "sender_email": sender_from,
+            "gmail_mode": gmail_status.get("mode"),
+            "total": len(req.leads),
+        })
+
         for idx, row in enumerate(req.leads):
-            website = row.get('website', '')
+            website = row.get("website", "")
             if not website:
                 continue
-                
-            yield f"data: {json.dumps({'type': 'status_update', 'row_index': idx, 'status': '⚙️ Processing...'})}\n\n"
-            
+
+            yield _sse({"type": "status_update", "row_index": idx, "status": "⚙️ Processing..."})
+            yield _stage(idx, "queued", "Queued", "done")
+
             try:
-                yield f"data: {json.dumps({'type': 'log', 'message': f'Scraping: {website}'})}\n\n"
-                
-                # Run sync scraper in a thread to not block asyncio
+                yield _stage(idx, "scrape", "Scraping website")
+                yield _sse({"type": "log", "message": f"Scraping: {website}"})
+
                 scraped_data = await run_in_thread(scrape_and_process, website)
                 if not scraped_data:
                     raise Exception("Scraper failed to return data.")
-                
+
+                company = company_from_website(
+                    website, row.get("company") or scraped_data.get("company") or ""
+                )
+                yield _stage(idx, "scrape", "Website profile ready", "done", company=company)
+                yield _stage(idx, "analyze", "Analyzing company needs")
+
                 _apply_recipient(
                     scraped_data,
                     recipient_override=req.recipient_override,
                     lead=row,
                 )
-                
-                yield f"data: {json.dumps({'type': 'log', 'message': f'Generating EML for: {website}'})}\n\n"
+                yield _stage(idx, "analyze", "Company analyzed", "done")
+
+                yield _stage(idx, "retrieve", "Matching catalogue products")
+                yield _sse({"type": "log", "message": f"Generating EML for: {website}"})
+                yield _stage(idx, "retrieve", "Catalogue matches ready", "done")
+                yield _stage(idx, "draft", "Writing personalized email")
+
                 eml_path, trace_info = await run_in_thread(
                     generate_eml_from_record, scraped_data, idx + 1, outdir, req.template
                 )
-                
+
                 if not eml_path or not os.path.exists(eml_path):
                     raise Exception("EML generation failed.")
-                
-                # Load HTML preview
+
+                yield _stage(idx, "draft", "Draft written", "done")
+                yield _stage(idx, "render", "Rendering HTML preview")
+
                 html_content = ""
                 html_path = Path(eml_path).with_suffix(".html")
+                subject = (trace_info or {}).get("subject", "") or ""
                 if html_path.exists():
-                    with open(html_path, 'r', encoding='utf-8') as f:
+                    with open(html_path, "r", encoding="utf-8") as f:
                         html_content = f.read()
-                    
-                    yield f"data: {json.dumps({'type': 'preview_html', 'row_index': idx, 'subject': (trace_info or {}).get('subject', ''), 'html': html_content})}\n\n"
-                
-                # Send RAG Trace Info
-                yield f"data: {json.dumps({'type': 'rag_trace', 'row_index': idx, 'data': {'company': scraped_data.get('company', website), 'website': website, 'trace_info': trace_info}})}\n\n"
+
+                yield _stage(idx, "render", "Preview ready", "done")
+                yield _sse({
+                    "type": "preview_html",
+                    "row_index": idx,
+                    "subject": subject,
+                    "html": html_content,
+                    "company": company,
+                    "website": website,
+                    "to": str(scraped_data.get("emails", "")).split(",")[0].strip(),
+                    "from": sender_from,
+                })
+
+                yield _sse({
+                    "type": "rag_trace",
+                    "row_index": idx,
+                    "data": {
+                        "company": scraped_data.get("company", website),
+                        "website": website,
+                        "trace_info": trace_info,
+                    },
+                })
 
                 if not req.autosend:
                     to_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
@@ -1195,41 +1276,50 @@ async def process_leads(req: ProcessRequest):
                         "outdir": outdir,
                         "eml_path": eml_path,
                         "html_path": str(html_path),
-                        "subject": (trace_info or {}).get("subject") or "",
+                        "subject": subject,
                         "html": html_content,
-                        "from": (trace_info or {}).get("from") or "",
+                        "from": (trace_info or {}).get("from") or sender_from,
                         "to": to_email,
                         "website": website,
-                        "company": company_from_website(
-                            website, row.get("company") or scraped_data.get("company") or ""
-                        ),
+                        "company": company,
                         "template": req.template,
-                        "sender_email": req.sender_email or "",
+                        "sender_email": req.sender_email or sender_from,
                         "scraped_data": scraped_data,
                         "row_index": idx,
                         "chat": [],
                     })
-                    yield f"data: {json.dumps({'type': 'draft_ready', 'row_index': idx, 'draft_id': draft_id, 'subject': (trace_info or {}).get('subject', ''), 'html': html_content, 'to': to_email})}\n\n"
-                    yield f"data: {json.dumps({'type': 'status_update', 'row_index': idx, 'status': '📝 Ready for review'})}\n\n"
+                    yield _sse({
+                        "type": "draft_ready",
+                        "row_index": idx,
+                        "draft_id": draft_id,
+                        "subject": subject,
+                        "html": html_content,
+                        "to": to_email,
+                    })
+                    yield _sse({"type": "status_update", "row_index": idx, "status": "📝 Ready for review"})
                     continue
-                
-                yield f"data: {json.dumps({'type': 'log', 'message': f'Sending email via GSuite for {website}'})}\n\n"
+
+                yield _stage(
+                    idx,
+                    "send",
+                    f"Sending via Gmail{f' as {sender_from}' if sender_from else ''}",
+                )
+                yield _sse({"type": "log", "message": f"Sending email via Gmail for {website}"})
                 send_result = await run_in_thread(
-                    send_email_gsuite, eml_path, req.sender_email, org_id
+                    send_email_gsuite, eml_path, req.sender_email or sender_from or None, org_id
                 )
 
                 if not send_result.get("success"):
-                    raise Exception(send_result.get("error", "GSuite sending failed."))
+                    raise Exception(send_result.get("error", "Gmail sending failed."))
 
                 recipient_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
-                subject = ""
                 body_text = ""
                 if html_path.exists():
                     from email import message_from_string
                     with open(eml_path, "r", encoding="utf-8") as f:
                         eml_raw = f.read()
                     eml_msg = message_from_string(eml_raw)
-                    subject = eml_msg.get("Subject", "")
+                    subject = subject or eml_msg.get("Subject", "")
                     for part in eml_msg.walk():
                         if part.get_content_type() == "text/plain":
                             body_text = part.get_payload(decode=True).decode("utf-8", errors="replace")
@@ -1252,28 +1342,33 @@ async def process_leads(req: ProcessRequest):
                             gmail_message_id=send_result.get("message_id") or "",
                             gmail_thread_id=send_result.get("thread_id") or "",
                         )
-                        yield f"data: {json.dumps({'type': 'log', 'message': f'Conversation created for {recipient_email}'})}\n\n"
+                        yield _sse({"type": "log", "message": f"Conversation created for {recipient_email}"})
                     except Exception as conv_err:
-                        yield f"data: {json.dumps({'type': 'log', 'message': f'Warning: conversation not saved: {conv_err}'})}\n\n"
+                        yield _sse({"type": "log", "message": f"Warning: conversation not saved: {conv_err}"})
 
-                yield f"data: {json.dumps({'type': 'log', 'message': f'Email sent successfully for: {website}'})}\n\n"
-                yield f"data: {json.dumps({'type': 'status_update', 'row_index': idx, 'status': '✅ Sent'})}\n\n"
-                
+                yield _stage(idx, "send", "Sent", "done")
+                yield _sse({"type": "log", "message": f"Email sent successfully for: {website}"})
+                yield _sse({"type": "status_update", "row_index": idx, "status": "✅ Sent"})
+
             except Exception as e:
                 err_msg = str(e)
                 if "Content filter triggered" in err_msg:
-                    log_msg = f"Policy Violation: Azure's safety filters flagged the content for {website}. This often happens if the website content or our prompt looks suspicious to the AI."
+                    log_msg = (
+                        f"Policy Violation: Azure's safety filters flagged the content for {website}. "
+                        "This often happens if the website content or our prompt looks suspicious to the AI."
+                    )
                     status_msg = "❌ Safety Filter Triggered"
                 else:
                     log_msg = f"Error processing {website}: {err_msg}"
                     status_msg = f"❌ Failed: {err_msg[:50]}..."
-                
-                yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
-                yield f"data: {json.dumps({'type': 'status_update', 'row_index': idx, 'status': status_msg})}\n\n"
-            
+
+                yield _stage(idx, "error", err_msg[:120], "error")
+                yield _sse({"type": "log", "message": log_msg})
+                yield _sse({"type": "status_update", "row_index": idx, "status": status_msg})
+
             await asyncio.sleep(req.delay)
-            
-        yield f"data: {json.dumps({'type': 'done', 'message': 'Processing complete!'})}\n\n"
+
+        yield _sse({"type": "done", "message": "Processing complete!"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

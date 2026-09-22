@@ -23,6 +23,7 @@ export function SettingsPage() {
   const [gmail, setGmail] = useState<{
     connected: boolean
     email?: string
+    connected_email?: string
     mode?: string
     message?: string
   }>({ connected: false })
@@ -161,14 +162,18 @@ export function SettingsPage() {
 
             {!gmail.connected ? (
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                {gmail.message || 'Connect the Starlight Workspace inbox to sync replies.'}
+                {gmail.message ||
+                  'Sign in with Google on the login page (any Google account), or connect Gmail here. Outbound mail is sent from the connected inbox.'}
               </p>
-            ) : null}
+            ) : (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                Campaigns and replies send as <strong>{gmail.email || gmail.connected_email}</strong>.
+              </p>
+            )}
 
             {!gmail.connected && gmail.mode === 'platform' && gmail.email ? (
               <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                Campaigns currently send as <strong>{gmail.email}</strong> using the shared Workspace
-                service account. Connecting Gmail is only needed to send from your own inbox.
+                Platform fallback sender: <strong>{gmail.email}</strong>. Connect your Google account to send from your own inbox instead.
               </p>
             ) : null}
 
@@ -178,7 +183,8 @@ export function SettingsPage() {
                 <div style={{ marginTop: 4 }}>{gmailNotice}</div>
                 <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
                   Set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and
-                  GOOGLE_OAUTH_REDIRECT_URI on the server to enable per-user Gmail.
+                  GOOGLE_OAUTH_REDIRECT_URI on the server. OAuth client must allow any Google account
+                  (External app type — not limited to a Workspace domain).
                 </div>
               </div>
             ) : null}

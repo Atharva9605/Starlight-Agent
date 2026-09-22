@@ -127,6 +127,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  googleAuthorize: () =>
+    request<{ configured: boolean; url: string | null; message?: string }>(
+      '/api/auth/google/authorize',
+    ),
   me: () =>
     request<{
       user?: { email: string; name: string; id?: string }
@@ -152,7 +156,8 @@ export const api = {
     request<{
       connected: boolean
       email?: string
-      mode?: 'platform' | 'oauth'
+      connected_email?: string
+      mode?: 'platform' | 'oauth' | 'none'
       message?: string
     }>('/api/integrations/gmail/status'),
   gmailAuthorize: () =>

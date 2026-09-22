@@ -109,7 +109,26 @@ export function CampaignReviewPage() {
         <div className="review-body">
           <div className="review-mail">
             {generating && !draft ? (
-              <div className="skeleton-frame tall">Scraping site & writing the email…</div>
+              <div className="skeleton-frame tall live-preview-empty">
+                <div className="live-pulse-ring" />
+                <strong>Writing email for lead {currentIndex + 1}…</strong>
+                <ol className="gen-timeline" style={{ width: 'min(360px, 100%)', textAlign: 'left', marginTop: '1.25rem' }}>
+                  {[
+                    'Scraping website',
+                    'Analyzing company',
+                    'Matching catalogue',
+                    'Drafting personalized email',
+                    'Rendering preview',
+                  ].map((label, i) => (
+                    <li key={label} className={`gen-step ${i < 2 ? 'done' : i === 2 ? 'active' : 'pending'}`}>
+                      <span className="gen-step-marker" aria-hidden />
+                      <div className="gen-step-body">
+                        <div className="gen-step-title">{label}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
             ) : draft ? (
               <EmailPreviewFrame html={draft.html} subject={draft.subject} fullscreen />
             ) : (
