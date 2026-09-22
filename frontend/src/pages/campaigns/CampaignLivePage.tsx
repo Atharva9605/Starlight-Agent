@@ -17,7 +17,7 @@ const STAGE_LABELS: Record<string, string> = {
 
 function mergeTimeline(events: StageEvent[] | undefined): { id: string; label: string; state: string }[] {
   const byStage = new Map((events || []).map((e) => [e.stage, e]))
-  const rows = STAGE_ORDER.map((id) => {
+  const rows: { id: string; label: string; state: string }[] = STAGE_ORDER.map((id) => {
     const ev = byStage.get(id)
     return {
       id,
