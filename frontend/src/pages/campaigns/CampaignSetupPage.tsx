@@ -7,9 +7,9 @@ import { api } from '../../api/client'
 type TemplateOption = { value: string; label: string; blurb: string; swatch: string[] }
 
 const SWATCHES: Record<string, string[]> = {
-  'email_template.html': ['#0e7490', '#eab308'],
-  'email_template_minimalist.html': ['#0c1b24', '#4d6673'],
-  'email_template_bold.html': ['#ca8a04', '#ea580c'],
+  'email_template.html': ['#2563eb', '#06b6d4'],
+  'email_template_minimalist.html': ['#0f172a', '#64748b'],
+  'email_template_bold.html': ['#f59e0b', '#e11d48'],
 }
 
 function toOption(t: { name: string; label: string; is_custom?: boolean }): TemplateOption {
@@ -17,7 +17,7 @@ function toOption(t: { name: string; label: string; is_custom?: boolean }): Temp
     value: t.name,
     label: t.label || t.name,
     blurb: t.is_custom ? 'Custom AI / saved design.' : TEMPLATES.find((x) => x.value === t.name)?.blurb || 'Org template.',
-    swatch: SWATCHES[t.name] || (t.is_custom ? ['#0d9488', '#14b8a6'] : ['#0e7490', '#06b6d4']),
+    swatch: SWATCHES[t.name] || (t.is_custom ? ['#0d9488', '#14b8a6'] : ['#2563eb', '#06b6d4']),
   }
 }
 
