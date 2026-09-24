@@ -86,8 +86,8 @@ export function CampaignSetupPage() {
   const launch = async () => {
     setLaunching(true)
     try {
-      const mode = await start()
-      nav(mode === 'live' ? '/campaigns/live' : '/campaigns/review')
+      await start()
+      nav('/campaigns/live')
     } finally {
       setLaunching(false)
     }
@@ -100,30 +100,23 @@ export function CampaignSetupPage() {
       <div className="page-hero">
         <div>
           <h1>Campaigns</h1>
-          <p>Upload leads, choose a look, then review each email — or turn on autosend.</p>
+          <p>Upload leads, choose a look, then start — review and send on the live progress page.</p>
         </div>
         <div className="row">
-          {leads.length ? (
+          {inFlight ? (
+            <button className="btn" type="button" onClick={() => nav('/campaigns/live')}>
+              View Live progress Logs
+            </button>
+          ) : (
             <button
               className="btn"
               type="button"
-              onClick={() => nav('/campaigns/live')}
+              disabled={!leads.length || launching}
+              onClick={launch}
             >
-              View Live progress Logs
+              {launching ? 'Starting…' : 'Start campaign'}
             </button>
-          ) : null}
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={!leads.length || launching || inFlight}
-            onClick={launch}
-          >
-            {launching
-              ? 'Starting…'
-              : autosend
-                ? `Autosend ${leads.length || ''} leads`
-                : `Generate & review ${leads.length || ''} leads`}
-          </button>
+          )}
         </div>
       </div>
 
@@ -230,7 +223,7 @@ export function CampaignSetupPage() {
               <span>
                 <strong>Autosend</strong>
                 <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                  Skip review — scrape, write, and send every lead automatically. Opens Live progress Logs.
+                  Skip review — scrape, write, and send every lead automatically on Live progress Logs.
                 </span>
               </span>
             </label>
@@ -251,11 +244,11 @@ export function CampaignSetupPage() {
 
             {!autosend ? (
               <div className="alert warn" style={{ margin: 0 }}>
-                You'll review each email full-screen. Progress for each lead shows while it generates.
+                You'll review and send each email on <strong>Live progress Logs</strong> after you hit Start campaign.
               </div>
             ) : (
               <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
-                Live progress Logs open at <strong>/campaigns/live</strong> with live preview and per-lead stage timeline.
+                Autosend runs on <strong>/campaigns/live</strong> with live preview and per-lead stage timeline.
               </div>
             )}
 

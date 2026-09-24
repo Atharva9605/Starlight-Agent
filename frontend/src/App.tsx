@@ -9,7 +9,6 @@ import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { ThreadPage } from './pages/ThreadPage'
 import { CampaignSetupPage } from './pages/campaigns/CampaignSetupPage'
-import { CampaignReviewPage } from './pages/campaigns/CampaignReviewPage'
 import { CampaignLivePage } from './pages/campaigns/CampaignLivePage'
 import { CataloguesPage } from './pages/CataloguesPage'
 import { PublicCataloguePage } from './pages/PublicCataloguePage'
@@ -54,7 +53,7 @@ export default function App() {
               <Route path="inbox" element={<InboxPage />} />
               <Route path="inbox/:id" element={<ThreadPage />} />
               <Route path="campaigns" element={<CampaignSetupPage />} />
-              <Route path="campaigns/review" element={<CampaignReviewPage />} />
+              <Route path="campaigns/review" element={<Navigate to="/campaigns/live" replace />} />
               <Route path="campaigns/live" element={<CampaignLivePage />} />
               <Route path="campaigns/new/*" element={<Navigate to="/campaigns" replace />} />
               <Route path="catalogues" element={<CataloguesPage />} />

@@ -108,7 +108,7 @@ type CampaignValue = {
   uploadLeads: (file: File) => Promise<void>
   removeLead: (index: number) => void
   clearLeads: () => void
-  start: () => Promise<'review' | 'live'>
+  start: () => Promise<'live'>
   stop: () => void
   reset: () => void
   sendCurrent: () => Promise<void>
@@ -220,9 +220,20 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     const opts = optsRef.current
     setGenerating(true)
     setDraft(null)
+    setLivePreview(null)
     setChat([])
     setCurrentIndex(index)
     setLeadStatus(index, '⚙️ Generating…')
+    // Mirror autosend stage rail so Live progress logs shows work in review mode.
+    for (const stage of ['queued', 'scrape', 'analyze', 'retrieve', 'draft'] as const) {
+      pushStage(index, {
+        stage,
+        label: stage === 'retrieve' ? 'Catalogue' : stage[0].toUpperCase() + stage.slice(1),
+        state: stage === 'draft' ? 'active' : 'done',
+      })
+    }
+    pushStage(index, { stage: 'render', label: 'Preview', state: 'pending' })
+    pushStage(index, { stage: 'send', label: 'Send', state: 'pending' })
     try {
       const res = await api.campaignGenerate({
         lead,
@@ -242,6 +253,33 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         to: res.to,
       }
       setDraft(d)
+      setLivePreview({
+        rowIndex: index,
+        html: res.html,
+        subject: res.subject,
+        company: res.company,
+        website: res.website,
+        to: res.to,
+        from: opts.senderEmail || undefined,
+        productCount: res.product_count,
+        productSheet: res.product_sheet,
+      })
+      setLeads((prev) =>
+        prev.map((l, i) =>
+          i === index
+            ? {
+                ...l,
+                _preview_html: res.html,
+                _subject: res.subject,
+                _product_sheet: res.product_sheet,
+                _product_count: res.product_count,
+              }
+            : l,
+        ),
+      )
+      pushStage(index, { stage: 'draft', label: 'Draft', state: 'done' })
+      pushStage(index, { stage: 'render', label: 'Preview', state: 'done' })
+      pushStage(index, { stage: 'send', label: 'Send', state: 'active' })
       setChat([
         {
           role: 'system',
@@ -251,6 +289,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       setLeadStatus(index, '📝 Ready for review')
       return d
     } catch (e: any) {
+      pushStage(index, { stage: 'error', label: e.message || 'Failed', state: 'error' })
       setLeadStatus(index, `❌ ${e.message || 'Failed'}`)
       setLogs((prev) => [...prev, e.message || String(e)])
       return null
@@ -281,7 +320,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     stopReviewRef.current = false
     setStatus('reviewing')
     setLogs([])
-    setLeads((prev) => prev.map((l) => ({ ...l, _status: '' })))
+    setStagesByLead({})
+    setLivePreview(null)
+    setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
     for (let i = 0; i < leadsRef.current.length; i++) {
       if (stopReviewRef.current) {
         setStatus('stopped')
@@ -402,13 +443,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const start = useCallback(async (): Promise<'review' | 'live'> => {
+  const start = useCallback(async (): Promise<'live'> => {
     if (optsRef.current.autosend) {
       void startAutosend()
-      return 'live'
+    } else {
+      void startReview()
     }
-    void startReview()
-    return 'review'
+    return 'live'
   }, [startAutosend, startReview])
 
   const sendCurrent = useCallback(async () => {
@@ -416,11 +457,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setSending(true)
     try {
       await api.campaignSend(draft.draftId)
+      pushStage(draft.rowIndex, { stage: 'send', label: 'Send', state: 'done' })
       setLeadStatus(draft.rowIndex, '✅ Sent')
       setChat((prev) => [...prev, { role: 'assistant', content: `Sent to ${draft.to || 'recipient'}.` }])
       setDraft(null)
+      setLivePreview(null)
       await advanceReview(draft.rowIndex)
     } catch (e: any) {
+      pushStage(draft.rowIndex, { stage: 'send', label: 'Send', state: 'error' })
       setLeadStatus(draft.rowIndex, `❌ ${e.message || 'Send failed'}`)
       setChat((prev) => [...prev, { role: 'assistant', content: e.message || 'Send failed' }])
     } finally {
@@ -437,6 +481,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
     setLeadStatus(draft.rowIndex, '⏭ Skipped')
     setDraft(null)
+    setLivePreview(null)
     await advanceReview(draft.rowIndex)
   }, [draft, advanceReview])
 
@@ -446,10 +491,23 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setChat((prev) => [...prev, { role: 'user', content: message.trim() }])
     try {
       const res = await api.campaignRevise(draft.draftId, message.trim())
-      setDraft((d) =>
-        d
-          ? { ...d, subject: res.subject, html: res.html }
-          : d,
+      setDraft((d) => (d ? { ...d, subject: res.subject, html: res.html } : d))
+      setLivePreview((p) =>
+        p && p.rowIndex === draft.rowIndex
+          ? { ...p, html: res.html, subject: res.subject }
+          : {
+              rowIndex: draft.rowIndex,
+              html: res.html,
+              subject: res.subject,
+              company: draft.company,
+              website: draft.website,
+              to: draft.to,
+            },
+      )
+      setLeads((prev) =>
+        prev.map((l, i) =>
+          i === draft.rowIndex ? { ...l, _preview_html: res.html, _subject: res.subject } : l,
+        ),
       )
       setChat((prev) => [...prev, { role: 'assistant', content: 'Updated — check the preview.' }])
     } catch (e: any) {
