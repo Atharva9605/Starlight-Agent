@@ -103,13 +103,13 @@ export function CampaignSetupPage() {
           <p>Upload leads, choose a look, then review each email — or turn on autosend.</p>
         </div>
         <div className="row">
-          {inFlight ? (
+          {leads.length ? (
             <button
               className="btn"
               type="button"
-              onClick={() => nav(autosend ? '/campaigns/live' : '/campaigns/review')}
+              onClick={() => nav('/campaigns/live')}
             >
-              Open progress dashboard →
+              View Live progress Logs
             </button>
           ) : null}
           <button
@@ -230,7 +230,7 @@ export function CampaignSetupPage() {
               <span>
                 <strong>Autosend</strong>
                 <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                  Skip review — scrape, write, and send every lead automatically. Opens the progress dashboard.
+                  Skip review — scrape, write, and send every lead automatically. Opens Live progress Logs.
                 </span>
               </span>
             </label>
@@ -255,7 +255,7 @@ export function CampaignSetupPage() {
               </div>
             ) : (
               <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
-                Progress dashboard opens at <strong>/campaigns/live</strong> with live preview and per-email timeline.
+                Live progress Logs open at <strong>/campaigns/live</strong> with live preview and per-lead stage timeline.
               </div>
             )}
 

@@ -32,7 +32,19 @@ function mergeTimeline(events: StageEvent[] | undefined): { id: string; label: s
   return rows
 }
 
-/** Progress dashboard — live preview + per-email pipeline (autosend). */
+/** Active stage, else last completed, else Queued — for the lead queue column. */
+function currentStageLabel(events: StageEvent[] | undefined): string {
+  const timeline = mergeTimeline(events)
+  const active = timeline.find((s) => s.state === 'active')
+  if (active) return active.label
+  const err = timeline.find((s) => s.state === 'error')
+  if (err) return err.label
+  const done = [...timeline].reverse().find((s) => s.state === 'done')
+  if (done) return done.label
+  return STAGE_LABELS.queued
+}
+
+/** Live progress logs — preview + per-lead pipeline stages. */
 export function CampaignLivePage() {
   const nav = useNavigate()
   const {
@@ -42,7 +54,6 @@ export function CampaignLivePage() {
     counts,
     stop,
     reset,
-    autosend,
     livePreview,
     stagesByLead,
     runSender,
@@ -50,9 +61,6 @@ export function CampaignLivePage() {
   } = useCampaign()
 
   if (!leads.length) return <Navigate to="/campaigns" replace />
-  if (!autosend && status !== 'running' && status !== 'done' && status !== 'stopped' && status !== 'failed') {
-    return <Navigate to="/campaigns/review" replace />
-  }
 
   const running = status === 'running'
   const pct = counts.progressPct
@@ -80,7 +88,7 @@ export function CampaignLivePage() {
         <div>
           <div className="dash-kicker">
             {running ? <span className="live-dot" /> : null}
-            Campaign progress dashboard
+            Live progress logs
           </div>
           <h1>
             {running
@@ -89,7 +97,7 @@ export function CampaignLivePage() {
                 ? 'Campaign complete'
                 : status === 'stopped'
                   ? 'Campaign stopped'
-                  : 'Autosend dashboard'}
+                  : 'Live progress logs'}
           </h1>
           <p className="muted">
             {counts.sent} sent · {counts.failed} failed · {counts.processing} in progress
@@ -177,7 +185,7 @@ export function CampaignLivePage() {
               <div className="live-pulse-ring" />
               <strong>{running ? 'Generating this email…' : 'Preview appears here as each email is written'}</strong>
               <p className="muted" style={{ margin: '0.4rem 0 0', maxWidth: '40ch' }}>
-                This is the campaign progress dashboard — open it anytime from Campaigns → Resume while a run is live.
+                Live progress logs — open anytime from Campaigns → View Live progress Logs while leads are loaded.
               </p>
             </div>
           )}
@@ -212,11 +220,19 @@ export function CampaignLivePage() {
             <div className="queue dash-queue">
               {leads.map((l, i) => {
                 const st = leadState(l)
+                const stage = currentStageLabel(stagesByLead[i])
                 return (
                   <div key={i} className={`queue-row${i === focusIdx ? ' active' : ''}`}>
                     <span className={`queue-index ${st}`}>{i + 1}</span>
-                    <span className="queue-name">{l.website || l.company || `Lead ${i + 1}`}</span>
-                    <span className="pill">{st === 'pending' ? 'Queued' : (l._status || st)}</span>
+                    <span className="queue-name">
+                      {l.website || l.company || `Lead ${i + 1}`}
+                      <span className="muted" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
+                        {stage}
+                      </span>
+                    </span>
+                    <span className={`pill ${st === 'sent' ? 'ok' : st === 'failed' ? 'pink' : st === 'processing' ? 'warn' : ''}`}>
+                      {st === 'pending' ? 'Queued' : (l._status || st)}
+                    </span>
                   </div>
                 )
               })}
