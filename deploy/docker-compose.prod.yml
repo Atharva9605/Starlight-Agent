@@ -47,6 +47,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      openserp:
+        condition: service_started
     env_file:
       - ../.env
     environment:
@@ -57,6 +59,7 @@ services:
       BLOB_BACKEND: local
       STATIC_SERVER_URL: ${STATIC_SERVER_URL:-https://api.mailer.starlightlinearled.com/media}
       PUBLIC_API_URL: ${PUBLIC_API_URL:-https://api.mailer.starlightlinearled.com}
+      OPENSERP_BASE_URL: ${OPENSERP_BASE_URL:-http://openserp:7000}
     volumes:
       - mailer_data:/app/data
       - mailer_attachments:/app/static/attachments
@@ -78,6 +81,17 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+
+  # Free self-hosted SERP — name-only leads → website (no API keys / no billing)
+  openserp:
+    image: karust/openserp:latest
+    container_name: starlight-mailer-openserp
+    restart: unless-stopped
+    command: ["serve", "-a", "0.0.0.0", "-p", "7000"]
+    expose:
+      - "7000"
+    networks:
+      - deploy_default
 
   web:
     build:

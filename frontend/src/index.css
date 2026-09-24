@@ -1008,10 +1008,40 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dash-rail {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--rail-cols, 7), minmax(0, 1fr));
   gap: 0.35rem;
   margin: 1rem 0 0;
   padding: 0;
+}
+.dash-rail-step.discover .dash-rail-dot {
+  border-color: #0d9488;
+}
+.dash-rail-step.discover.active .dash-rail-dot {
+  background: #14b8a6;
+  border-color: #0d9488;
+  box-shadow: 0 0 0 4px rgba(20, 184, 166, 0.2);
+}
+.dash-rail-step.discover.done .dash-rail-dot {
+  background: #0d9488;
+  border-color: #0d9488;
+}
+.dash-detail.discover.active .dash-detail-mark,
+.dash-detail.discover.done .dash-detail-mark {
+  background: #0d9488;
+  border-color: #0d9488;
+}
+.pill.discover {
+  background: #ccfbf1;
+  color: #0f766e;
+  border-color: #99f6e4;
+}
+.queue-row-btn {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  background: transparent;
 }
 .dash-rail-step {
   display: flex;
@@ -1332,7 +1362,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .setup-actions { position: static; }
   .skeleton-frame.tall { min-height: 50vh; }
   .dash-side { position: static; }
-  .dash-rail { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .dash-rail { grid-template-columns: repeat(min(var(--rail-cols, 7), 4), minmax(0, 1fr)); }
 }
 .email-chrome-bar {
   background: linear-gradient(90deg, #f1f5f9, #eef2ff);

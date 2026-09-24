@@ -4,6 +4,7 @@ import pandas as pd
 from pathlib import Path
 
 from scraper import scrape_and_process
+from website_discovery import ensure_lead_website, clean_lead_value, lead_search_name
 from generator_v2 import generate_eml_from_record
 from send_eml_gsuite import send_email_gsuite
 
@@ -23,11 +24,18 @@ def wait_for_eml(output_dir, before_files, timeout=WAIT_TIMEOUT):
         time.sleep(2)
     return None
 
-def process_record(website, record_index):
-    print(f"\n🟢 Processing Record {record_index+1}: {website}")
+def process_record(lead: dict, record_index: int):
+    name = lead_search_name(lead) or clean_lead_value(lead.get("website"))
+    print(f"\n🟢 Processing Record {record_index+1}: {name or 'lead'}")
+
+    try:
+        website = ensure_lead_website(lead)
+    except ValueError as e:
+        print(f"❌ {e}")
+        return
 
     # Step 1: Scraping
-    print("🔹 Step 1: Scraping...")
+    print(f"🔹 Step 1: Scraping {website}...")
     scraped = scrape_and_process(website)
     if not scraped:
         print("❌ Scraper failed, skipping record.")
@@ -54,6 +62,24 @@ def process_record(website, record_index):
     send_email_gsuite(eml_path, sender_email="vivek@starlightlinearled.com")
     print(f"✅ Email sent successfully to {recipient_email}")
 
+def _normalize_cli_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    rename = {}
+    for col in df.columns:
+        key = str(col).strip().lower().replace("-", "_").replace(" ", "_")
+        if key in ("website", "web_site", "url", "site", "website_url"):
+            rename[col] = "website"
+        elif key in ("company", "company_name", "organisation", "organization", "org", "business", "business_name"):
+            rename[col] = "company"
+        elif key in ("name", "lead_name", "account_name", "prospect", "client", "client_name"):
+            rename[col] = "name"
+    if rename:
+        df = df.rename(columns=rename)
+    df = df.loc[:, ~df.columns.duplicated()]
+    if "company" not in df.columns and "name" in df.columns:
+        df["company"] = df["name"]
+    return df
+
+
 def main():
     print("\n🚀 Starting AI-CRM-Mailer Full Pipeline...\n")
 
@@ -61,16 +87,16 @@ def main():
         print("❌ Excel file not found.")
         return
 
-    df = pd.read_excel(INPUT_EXCEL)
+    df = _normalize_cli_dataframe(pd.read_excel(INPUT_EXCEL))
     if df.empty:
         print("❌ No data found in Excel file.")
         return
 
-    websites = df['website'].dropna().astype(str).tolist()
-    print(f"✅ Total records found: {len(websites)}")
+    records = df.fillna("").to_dict(orient="records")
+    print(f"✅ Total records found: {len(records)}")
 
-    for i, website in enumerate(websites):
-        process_record(website, i)
+    for i, lead in enumerate(records):
+        process_record(lead, i)
         time.sleep(SLEEP_BETWEEN_RECORDS)
 
     print("\n🎯 All records processed.\n")

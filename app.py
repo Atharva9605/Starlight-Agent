@@ -13,6 +13,10 @@ from pathlib import Path
 
 from rag_uploader import process_pdf_to_chroma
 from vector_store import get_status
+from scraper import scrape_and_process
+from website_discovery import ensure_lead_website, lead_search_name, clean_lead_value
+from generator_v2 import generate_eml_from_record
+from send_eml_gsuite import send_email_gsuite
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -363,8 +367,8 @@ with st.sidebar:
     st.markdown("### ⚙️ Mailer Settings")
 
     uploaded_file = st.file_uploader(
-        "Upload Client Leads (Excel)",
-        type=["xlsx", "xls"],
+        "Upload Client Leads (Excel/CSV)",
+        type=["xlsx", "xls", "csv"],
         key="excel_uploader",
     )
 
@@ -435,7 +439,11 @@ with tab_main:
 
     if uploaded_file:
         if st.session_state.df is None:
-            st.session_state.df = pd.read_excel(uploaded_file)
+            name = (uploaded_file.name or "").lower()
+            if name.endswith(".csv"):
+                st.session_state.df = pd.read_csv(uploaded_file)
+            else:
+                st.session_state.df = pd.read_excel(uploaded_file)
             st.session_state.df["Status"] = "Pending"
             add_log("Leads file uploaded successfully.")
 
@@ -510,13 +518,24 @@ if st.session_state.processing:
     total = len(df)
     
     for index, row in df.iterrows():
-        website = row.get("Website", row.get("website", ""))
-        if not website: continue
-        
-        status_text.markdown(f"**Currently Processing:** `{website}`")
-        progress_bar.progress((index + 1) / total)
-        
+        lead = {str(k): v for k, v in row.items()}
+        had_website = bool(clean_lead_value(lead.get("Website") or lead.get("website")))
+        search_name = lead_search_name(lead)
+        if not had_website and not search_name:
+            continue
+
         try:
+            if not had_website:
+                add_log(f"OpenSERP lookup: {search_name}")
+            website = ensure_lead_website(lead)
+            if "website" in df.columns:
+                df.at[index, "website"] = website
+            elif "Website" in df.columns:
+                df.at[index, "Website"] = website
+
+            status_text.markdown(f"**Currently Processing:** `{website}`")
+            progress_bar.progress((index + 1) / total)
+
             # Step 1: Scrape & Process
             add_log(f"Scraping website: {website}")
             scrape_data = scrape_and_process(website)
@@ -552,7 +571,8 @@ if st.session_state.processing:
                 df.at[index, "Status"] = "Error"
                 
         except Exception as e:
-            add_log(f"Error processing {website}: {str(e)}", "error")
+            label = search_name or lead.get("website") or lead.get("Website") or index
+            add_log(f"Error processing {label}: {str(e)}", "error")
             df.at[index, "Status"] = f"Error: {str(e)[:20]}"
         
         time.sleep(1) # Small delay for UX

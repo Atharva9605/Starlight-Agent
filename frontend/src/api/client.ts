@@ -317,6 +317,7 @@ export const api = {
       website: string
       company: string
       row_index: number
+      discovered?: boolean
       product_count?: number
       product_sheet?: string
       attached_product_sheet?: boolean

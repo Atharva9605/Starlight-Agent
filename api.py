@@ -35,6 +35,7 @@ import gmail_oauth
 
 # Import project modules
 from scraper import scrape_and_process
+from website_discovery import ensure_lead_website, lead_search_name, clean_lead_value
 from generator_v2 import generate_eml_from_record, query_rag_with_trace
 from template_generator import generate_template_html
 from send_eml_gsuite import send_email_gsuite, send_threaded_reply, check_gmail_health
@@ -900,20 +901,43 @@ async def download_emls():
     return FileResponse(zip_path, media_type='application/zip', filename="starlight_emls.zip")
 
 def _normalize_lead_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Map common Excel headers onto website / email / company."""
+    """Map common Excel/CSV headers onto website / email / company / name."""
     rename: dict = {}
     for col in df.columns:
         key = str(col).strip().lower().replace("-", "_").replace(" ", "_")
-        if key in ("website", "web_site", "url", "site", "website_url"):
+        if key in ("website", "web_site", "url", "site", "website_url", "homepage", "web"):
             rename[col] = "website"
         elif key in ("email", "e_mail", "mail", "emails", "email_address", "contact_email"):
             rename[col] = "email"
-        elif key in ("company", "company_name", "organisation", "organization", "org"):
+        elif key in (
+            "company",
+            "company_name",
+            "organisation",
+            "organization",
+            "org",
+            "business",
+            "business_name",
+            "firm",
+        ):
             rename[col] = "company"
+        elif key in ("name", "lead_name", "account_name", "prospect", "client", "client_name"):
+            rename[col] = "name"
     if rename:
         df = df.rename(columns=rename)
     # Keep a single canonical column if duplicates appear after rename
-    return df.loc[:, ~df.columns.duplicated()]
+    df = df.loc[:, ~df.columns.duplicated()]
+    # If the sheet only has "name", treat it as the company for display + SERP
+    if "company" not in df.columns and "name" in df.columns:
+        df["company"] = df["name"]
+    return df
+
+
+def _read_leads_dataframe(tmp_path: str, filename: str | None) -> pd.DataFrame:
+    """Load Excel or CSV lead lists."""
+    name = (filename or tmp_path or "").lower()
+    if name.endswith(".csv"):
+        return pd.read_csv(tmp_path)
+    return pd.read_excel(tmp_path)
 
 
 def _lead_email_from_row(lead: dict | None) -> str:
@@ -959,19 +983,45 @@ def _apply_recipient(scraped_data: dict, *, recipient_override: str | None = Non
 
 @app.post("/api/upload-leads")
 async def upload_leads(file: UploadFile = File(...)):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+    suffix = Path(file.filename or "leads.xlsx").suffix or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
     
     try:
-        df = _normalize_lead_dataframe(pd.read_excel(tmp_path))
-        if "website" not in df.columns:
-            return JSONResponse(status_code=400, content={"error": "Excel file must have a 'website' column."})
+        df = _normalize_lead_dataframe(_read_leads_dataframe(tmp_path, file.filename))
+        has_website = "website" in df.columns
+        has_name = "company" in df.columns or "name" in df.columns
+        if not has_website and not has_name:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "File must have a 'website' column, or a company/name column "
+                    "(name-only rows are resolved via OpenSERP)."
+                },
+            )
         
         df['status'] = "⏳ Pending"
         df['notes'] = ""
         records = df.fillna("").to_dict(orient="records")
-        return {"leads": records}
+        cleaned = []
+        for row in records:
+            item = {}
+            for key, val in row.items():
+                text = "" if val is None else str(val).strip()
+                if text.lower() in ("nan", "none", "null", "-"):
+                    text = ""
+                item[str(key)] = text
+            # Canonical empty website so OpenSERP path kicks in for company-only rows
+            if not item.get("website"):
+                item["website"] = ""
+            if not item.get("company") and item.get("name"):
+                item["company"] = item["name"]
+            # Drop rows with neither company nor website
+            if not item.get("website") and not item.get("company") and not item.get("name"):
+                continue
+            cleaned.append(item)
+        return {"leads": cleaned}
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     finally:
@@ -1004,9 +1054,12 @@ class CampaignReviseRequest(BaseModel):
 @app.post("/api/campaign/generate")
 async def campaign_generate(req: CampaignGenerateRequest):
     """Scrape + generate one outbound draft. Does not send."""
-    website = (req.lead or {}).get("website", "").strip()
-    if not website:
-        raise HTTPException(status_code=400, detail="Lead must include a website")
+    lead = dict(req.lead or {})
+    had_website = bool(clean_lead_value(lead.get("website")))
+    try:
+        website = await run_in_thread(ensure_lead_website, lead)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     org_id = get_organization_id()
     outdir = os.path.join("out_emails_api", org_id, "drafts")
@@ -1016,9 +1069,10 @@ async def campaign_generate(req: CampaignGenerateRequest):
     if not scraped_data:
         raise HTTPException(status_code=400, detail="Scraper failed for this website.")
 
-    _apply_recipient(scraped_data, recipient_override=req.recipient_override, lead=req.lead)
-    if req.lead.get("company"):
-        scraped_data.setdefault("company", req.lead["company"])
+    _apply_recipient(scraped_data, recipient_override=req.recipient_override, lead=lead)
+    company_hint = clean_lead_value(lead.get("company")) or lead_search_name(lead)
+    if company_hint:
+        scraped_data.setdefault("company", company_hint)
     scraped_data["website"] = website
 
     result = await run_in_thread(
@@ -1040,7 +1094,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
 
     to_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
     company = company_from_website(
-        website, req.lead.get("company") or scraped_data.get("company") or ""
+        website, lead.get("company") or scraped_data.get("company") or ""
     )
     draft = {
         "organization_id": org_id,
@@ -1058,6 +1112,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "scraped_data": scraped_data,
         "row_index": req.row_index,
         "chat": [],
+        "discovered": not had_website,
     }
     draft_id = store_draft(draft)
     return {
@@ -1069,6 +1124,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "website": website,
         "company": company,
         "row_index": req.row_index,
+        "discovered": not had_website,
         "product_count": len((trace_info or {}).get("product_refs") or []),
         "product_sheet": (trace_info or {}).get("product_sheet_name") or "",
         "attached_product_sheet": bool((trace_info or {}).get("attached_product_sheet")),
@@ -1207,14 +1263,53 @@ async def process_leads(req: ProcessRequest):
         })
 
         for idx, row in enumerate(req.leads):
-            website = row.get("website", "")
-            if not website:
+            row = dict(row or {})
+            had_website = bool(clean_lead_value(row.get("website")))
+            search_name = lead_search_name(row)
+
+            if not had_website and not search_name:
+                yield _sse({
+                    "type": "status_update",
+                    "row_index": idx,
+                    "status": "⏭ Skipped (no website or name)",
+                })
+                yield _sse({
+                    "type": "log",
+                    "message": f"Skipping lead {idx + 1}: need website or company/name",
+                })
                 continue
 
             yield _sse({"type": "status_update", "row_index": idx, "status": "⚙️ Processing..."})
             yield _stage(idx, "queued", "Queued", "done")
 
             try:
+                if not had_website:
+                    yield _stage(idx, "discover", f"Finding website for {search_name}")
+                    yield _sse({
+                        "type": "log",
+                        "message": f"OpenSERP lookup: {search_name}",
+                    })
+                    try:
+                        website = await run_in_thread(ensure_lead_website, row)
+                    except ValueError as e:
+                        raise Exception(str(e)) from e
+                    yield _stage(
+                        idx,
+                        "discover",
+                        f"Found {website}",
+                        "done",
+                        website=website,
+                        company=search_name,
+                    )
+                    yield _sse({
+                        "type": "lead_resolved",
+                        "row_index": idx,
+                        "website": website,
+                        "company": row.get("company") or search_name,
+                    })
+                else:
+                    website = await run_in_thread(ensure_lead_website, row)
+
                 yield _stage(idx, "scrape", "Scraping website")
                 yield _sse({"type": "log", "message": f"Scraping: {website}"})
 
@@ -1223,7 +1318,7 @@ async def process_leads(req: ProcessRequest):
                     raise Exception("Scraper failed to return data.")
 
                 company = company_from_website(
-                    website, row.get("company") or scraped_data.get("company") or ""
+                    website, row.get("company") or scraped_data.get("company") or search_name or ""
                 )
                 yield _stage(idx, "scrape", "Website profile ready", "done", company=company)
                 yield _stage(idx, "analyze", "Analyzing company needs")

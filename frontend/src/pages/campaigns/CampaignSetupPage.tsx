@@ -128,7 +128,7 @@ export function CampaignSetupPage() {
               accept=".xlsx,.xls,.csv"
               busy={busy}
               title="Drop Excel / CSV here"
-              hint="Needs a website column · optional email column is used as the recipient"
+              hint="Two columns: company + website. Website used when present; otherwise OpenSERP finds it from company."
               onFiles={onFiles}
             />
             {error ? <div className="alert danger">{error}</div> : null}
@@ -136,6 +136,9 @@ export function CampaignSetupPage() {
               <div className="row" style={{ justifyContent: 'space-between' }}>
                 <span className="muted">
                   <strong>{leads.length}</strong> leads · {fileName}
+                  {leads.some((l) => !l.website && (l.company || l.name)) ? (
+                    <> · <span className="pill discover">OpenSERP for name-only rows</span></>
+                  ) : null}
                 </span>
                 <button className="btn secondary" type="button" onClick={clearLeads}>
                   Clear
@@ -152,32 +155,41 @@ export function CampaignSetupPage() {
                   <thead>
                     <tr>
                       <th>#</th>
-                      <th>Website</th>
-                      <th>Email</th>
                       <th>Company</th>
+                      <th>Website</th>
+                      <th>Path</th>
                       <th />
                     </tr>
                   </thead>
                   <tbody>
-                    {leads.map((l, i) => (
+                    {leads.map((l, i) => {
+                      const viaSerp = !l.website && Boolean(l.company || l.name)
+                      return (
                       <tr key={i}>
                         <td className="muted">{i + 1}</td>
-                        <td style={{ fontWeight: 600 }}>{l.website || '—'}</td>
+                        <td style={{ fontWeight: 600 }}>{l.company || l.name || <span className="muted">—</span>}</td>
                         <td>
-                          {l.email ? (
-                            l.email
-                          ) : (
-                            <span className="muted">scrape</span>
+                          {l.website || (
+                            <span className="muted">{viaSerp ? 'will look up' : '—'}</span>
                           )}
                         </td>
-                        <td>{l.company || <span className="muted">auto</span>}</td>
+                        <td>
+                          {viaSerp ? (
+                            <span className="pill discover">OpenSERP</span>
+                          ) : l.website ? (
+                            <span className="pill">Website</span>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
                         <td>
                           <button className="icon-btn" type="button" onClick={() => removeLead(i)}>
                             ✕
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

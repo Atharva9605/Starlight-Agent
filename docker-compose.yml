@@ -24,6 +24,15 @@ services:
       - qdrant_storage:/qdrant/storage
     restart: unless-stopped
 
+  # Free self-hosted SERP API — resolve company name → website (no API keys)
+  openserp:
+    image: karust/openserp:latest
+    container_name: starlight_openserp
+    command: ["serve", "-a", "0.0.0.0", "-p", "7000"]
+    ports:
+      - "7000:7000"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   qdrant_storage:

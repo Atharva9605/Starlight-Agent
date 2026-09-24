@@ -143,7 +143,7 @@ export function CampaignReviewPage() {
                   return (
                     <div key={i} className={`queue-row${i === currentIndex ? ' active' : ''}`}>
                       <span className={`queue-index ${st}`}>{i + 1}</span>
-                      <span className="queue-name">{l.website || l.company || `Lead ${i + 1}`}</span>
+                      <span className="queue-name">{l.website || l.company || l.name || `Lead ${i + 1}`}</span>
                     </div>
                   )
                 })}

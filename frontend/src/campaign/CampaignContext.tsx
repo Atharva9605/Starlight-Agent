@@ -58,6 +58,13 @@ export const TEMPLATES = [
   },
 ]
 
+function leadHasIdentity(lead: Lead | undefined | null): boolean {
+  if (!lead) return false
+  const website = String(lead.website || '').trim()
+  const company = String(lead.company || lead.name || '').trim()
+  return Boolean(website || company)
+}
+
 function leadState(lead: Lead): 'sent' | 'failed' | 'processing' | 'pending' | 'ready' | 'skipped' {
   const s = String(lead._status || '').toLowerCase()
   if (s.includes('sent') || s.includes('✅')) return 'sent'
@@ -216,24 +223,29 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const generateAt = useCallback(async (index: number): Promise<Draft | null> => {
     const lead = leadsRef.current[index]
-    if (!lead?.website) return null
+    if (!leadHasIdentity(lead)) return null
     const opts = optsRef.current
+    const companyLabel = String(lead?.company || lead?.name || '').trim()
+    const needsDiscover = !String(lead?.website || '').trim()
     setGenerating(true)
     setDraft(null)
     setLivePreview(null)
     setChat([])
     setCurrentIndex(index)
-    setLeadStatus(index, '⚙️ Generating…')
-    // Mirror autosend stage rail so Live progress logs shows work in review mode.
-    for (const stage of ['queued', 'scrape', 'analyze', 'retrieve', 'draft'] as const) {
+    setStagesByLead((prev) => ({ ...prev, [index]: [] }))
+    setLeadStatus(index, needsDiscover ? '🔎 Finding website…' : '⚙️ Generating…')
+
+    pushStage(index, { stage: 'queued', label: 'Queued', state: 'done' })
+    if (needsDiscover) {
       pushStage(index, {
-        stage,
-        label: stage === 'retrieve' ? 'Catalogue' : stage[0].toUpperCase() + stage.slice(1),
-        state: stage === 'draft' ? 'active' : 'done',
+        stage: 'discover',
+        label: `OpenSERP · ${companyLabel || 'company'}`,
+        state: 'active',
       })
+    } else {
+      pushStage(index, { stage: 'scrape', label: 'Scraping website', state: 'active' })
     }
-    pushStage(index, { stage: 'render', label: 'Preview', state: 'pending' })
-    pushStage(index, { stage: 'send', label: 'Send', state: 'pending' })
+
     try {
       const res = await api.campaignGenerate({
         lead,
@@ -243,6 +255,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         row_index: index,
         attach_product_sheet: opts.attachProductSheet,
       })
+      const usedDiscover = needsDiscover || Boolean(res.discovered)
       const d: Draft = {
         draftId: res.draft_id,
         rowIndex: index,
@@ -269,24 +282,50 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           i === index
             ? {
                 ...l,
+                website: res.website || l.website,
+                company: res.company || l.company,
                 _preview_html: res.html,
                 _subject: res.subject,
                 _product_sheet: res.product_sheet,
                 _product_count: res.product_count,
+                _discovered: usedDiscover,
               }
             : l,
         ),
       )
-      pushStage(index, { stage: 'draft', label: 'Draft', state: 'done' })
-      pushStage(index, { stage: 'render', label: 'Preview', state: 'done' })
+      if (usedDiscover) {
+        pushStage(index, {
+          stage: 'discover',
+          label: `Found ${res.website}`,
+          state: 'done',
+        })
+      }
+      const doneStages: { stage: string; label: string }[] = [
+        { stage: 'scrape', label: 'Website profile ready' },
+        { stage: 'analyze', label: 'Company analyzed' },
+        { stage: 'retrieve', label: 'Catalogue matched' },
+        { stage: 'draft', label: 'Draft written' },
+        { stage: 'render', label: 'Preview ready' },
+      ]
+      for (const s of doneStages) {
+        pushStage(index, { stage: s.stage, label: s.label, state: 'done' })
+      }
       pushStage(index, { stage: 'send', label: 'Send', state: 'active' })
       setChat([
         {
           role: 'system',
-          content: `Draft ready for ${res.company || res.website}. Tell me what to change, or hit Send.`,
+          content: usedDiscover
+            ? `Found ${res.website} via OpenSERP for ${res.company || companyLabel}. Review the draft, then Send.`
+            : `Draft ready for ${res.company || res.website}. Tell me what to change, or hit Send.`,
         },
       ])
       setLeadStatus(index, '📝 Ready for review')
+      setLogs((prev) => [
+        ...prev,
+        usedDiscover
+          ? `OpenSERP → ${res.website} · draft ready`
+          : `Draft ready for ${res.website}`,
+      ])
       return d
     } catch (e: any) {
       pushStage(index, { stage: 'error', label: e.message || 'Failed', state: 'error' })
@@ -305,7 +344,12 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         setStatus('stopped')
         return
       }
-      if (!list[i]?.website) continue
+      if (!leadHasIdentity(list[i])) {
+        setLeadStatus(i, '⏭ Skipped (need company or website)')
+        setLogs((prev) => [...prev, `Skipped lead ${i + 1}: need company or website`])
+        continue
+      }
+      setCurrentIndex(i)
       const d = await generateAt(i)
       if (d) {
         setStatus('reviewing')
@@ -322,13 +366,24 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setLogs([])
     setStagesByLead({})
     setLivePreview(null)
-    setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
+    setLeads((prev) =>
+      prev.map((l) => ({
+        ...l,
+        _status: '',
+        _preview_html: '',
+        _subject: '',
+        _discovered: false,
+      })),
+    )
     for (let i = 0; i < leadsRef.current.length; i++) {
       if (stopReviewRef.current) {
         setStatus('stopped')
         return
       }
-      if (!leadsRef.current[i]?.website) continue
+      if (!leadHasIdentity(leadsRef.current[i])) {
+        setLeadStatus(i, '⏭ Skipped (need company or website)')
+        continue
+      }
       const d = await generateAt(i)
       if (d) return
     }
@@ -395,6 +450,19 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           if (evt.type === 'status_update') {
             setLeadStatus(evt.row_index, evt.status)
             setCurrentIndex(evt.row_index)
+          }
+          if (evt.type === 'lead_resolved') {
+            setLeads((prev) =>
+              prev.map((l, i) =>
+                i === evt.row_index
+                  ? {
+                      ...l,
+                      website: evt.website || l.website,
+                      company: evt.company || l.company,
+                    }
+                  : l,
+              ),
+            )
           }
           if (evt.type === 'stage') {
             pushStage(evt.row_index, {
