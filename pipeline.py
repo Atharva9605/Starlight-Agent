@@ -34,9 +34,22 @@ def process_record(lead: dict, record_index: int):
         print(f"❌ {e}")
         return
 
-    # Step 1: Scraping
+    # Step 1: Scraping (OpenSERP fallback if the sheet URL is unreachable)
     print(f"🔹 Step 1: Scraping {website}...")
     scraped = scrape_and_process(website)
+    if not scraped:
+        print(f"⚠ Could not scrape {website}; trying OpenSERP for the same company...")
+        try:
+            alt = ensure_lead_website(dict(lead), force_discover=True, exclude_websites=[website])
+            if alt:
+                print(f"🔹 OpenSERP found {alt}; scraping...")
+                scraped = scrape_and_process(alt)
+                if scraped:
+                    website = alt
+                    lead["website"] = alt
+        except ValueError as e:
+            print(f"❌ {e}")
+            scraped = None
     if not scraped:
         print("❌ Scraper failed, skipping record.")
         return

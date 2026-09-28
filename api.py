@@ -981,6 +981,39 @@ def _apply_recipient(scraped_data: dict, *, recipient_override: str | None = Non
         scraped_data["emails"] = lead_email
 
 
+async def _scrape_with_openserp_fallback(
+    lead: dict, website: str
+) -> tuple[str, dict | None, bool]:
+    """
+    Scrape ``website``. If that fails, OpenSERP-search the company name for
+    a different reachable site and scrape that instead.
+    Returns (website_used, scraped_data_or_none, used_openserp).
+    """
+    scraped = await run_in_thread(scrape_and_process, website)
+    if scraped:
+        return website, scraped, False
+
+    name = lead_search_name(lead)
+    if not name:
+        return website, None, False
+
+    try:
+        alt = await run_in_thread(
+            ensure_lead_website,
+            dict(lead),
+            force_discover=True,
+            exclude_websites=[website],
+        )
+    except ValueError:
+        return website, None, False
+
+    if not alt or alt.rstrip("/") == str(website or "").rstrip("/"):
+        return website, None, False
+
+    scraped = await run_in_thread(scrape_and_process, alt)
+    return alt, scraped, True
+
+
 @app.post("/api/upload-leads")
 async def upload_leads(file: UploadFile = File(...)):
     suffix = Path(file.filename or "leads.xlsx").suffix or ".xlsx"
@@ -1075,15 +1108,21 @@ async def campaign_generate(req: CampaignGenerateRequest):
     outdir = os.path.join("out_emails_api", org_id, "drafts")
     os.makedirs(outdir, exist_ok=True)
 
-    scraped_data = await run_in_thread(scrape_and_process, website)
+    original_website = website
+    scraped_data = None
+    used_openserp = req.force_discover or not had_website
+    website, scraped_data, fallback = await _scrape_with_openserp_fallback(lead, website)
+    used_openserp = used_openserp or fallback
     if not scraped_data:
+        name = lead_search_name(lead) or "this company"
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Could not reach {website}. The site may be down, blocking scrapes, "
-                "or the URL may be wrong."
+                f"Could not reach {original_website}. "
+                f"OpenSERP also found no reachable site for '{name}'."
             ),
         )
+    lead["website"] = website
 
     _apply_recipient(scraped_data, recipient_override=req.recipient_override, lead=lead)
     company_hint = clean_lead_value(lead.get("company")) or lead_search_name(lead)
@@ -1128,7 +1167,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "scraped_data": scraped_data,
         "row_index": req.row_index,
         "chat": [],
-        "discovered": req.force_discover or not had_website,
+        "discovered": used_openserp,
     }
     draft_id = store_draft(draft)
     return {
@@ -1140,7 +1179,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "website": website,
         "company": company,
         "row_index": req.row_index,
-        "discovered": req.force_discover or not had_website,
+        "discovered": used_openserp,
         "product_count": len((trace_info or {}).get("product_refs") or []),
         "product_sheet": (trace_info or {}).get("product_sheet_name") or "",
         "attached_product_sheet": bool((trace_info or {}).get("attached_product_sheet")),
@@ -1329,9 +1368,38 @@ async def process_leads(req: ProcessRequest):
                 yield _stage(idx, "scrape", "Scraping website")
                 yield _sse({"type": "log", "message": f"Scraping: {website}"})
 
-                scraped_data = await run_in_thread(scrape_and_process, website)
+                original_website = website
+                scraped_data = None
+                used_fallback = False
+                website, scraped_data, used_fallback = await _scrape_with_openserp_fallback(
+                    row, website
+                )
+                if used_fallback:
+                    yield _stage(
+                        idx,
+                        "discover",
+                        f"Sheet URL failed · OpenSERP found {website}",
+                        "done",
+                        website=website,
+                    )
+                    yield _sse({
+                        "type": "log",
+                        "message": f"Could not scrape {original_website}; OpenSERP → {website}",
+                    })
+                    yield _sse({
+                        "type": "lead_resolved",
+                        "row_index": idx,
+                        "website": website,
+                        "company": row.get("company") or search_name,
+                    })
+                    yield _stage(idx, "scrape", f"Scraping {website}")
+
                 if not scraped_data:
-                    raise Exception("Scraper failed to return data.")
+                    raise Exception(
+                        f"Could not reach {original_website}. "
+                        f"OpenSERP also found no reachable site"
+                        + (f" for '{search_name}'." if search_name else ".")
+                    )
 
                 company = company_from_website(
                     website, row.get("company") or scraped_data.get("company") or search_name or ""
