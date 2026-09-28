@@ -605,13 +605,12 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const remainingGenerateJobs = () =>
     leadsRef.current
-      .map((l, i) => i)
+      .map((_, i) => i)
       .filter((i) => {
-        const l = leadsRef.current[i]
-        if (!leadHasIdentity(l)) return false
+        const lead = leadsRef.current[i]
+        if (!leadHasIdentity(lead)) return false
         if (draftsRef.current[i]) return false
-        const s = leadState(l)
-        return s === 'pending'
+        return leadState(lead) === 'pending'
       })
 
   const runGenerateQueue = async (jobs: number[], genOpts?: { forceDiscover?: boolean }) => {
