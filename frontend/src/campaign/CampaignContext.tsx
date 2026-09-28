@@ -35,7 +35,10 @@ export type Draft = {
   subject: string
   html: string
   to: string
+  from?: string
 }
+
+const GEN_CONCURRENCY = 3
 
 export const TEMPLATES = [
   {
@@ -65,12 +68,13 @@ function leadHasIdentity(lead: Lead | undefined | null): boolean {
   return Boolean(website || company)
 }
 
-function leadState(lead: Lead): 'sent' | 'failed' | 'processing' | 'pending' | 'ready' | 'skipped' {
+function leadState(lead: Lead): 'sent' | 'failed' | 'processing' | 'pending' | 'ready' | 'skipped' | 'queued' {
   const s = String(lead._status || '').toLowerCase()
   if (s.includes('sent') || s.includes('✅')) return 'sent'
-  if (s.includes('skip')) return 'skipped'
-  if (s.includes('ready') || s.includes('📝')) return 'ready'
+  if (s.includes('skip') || s.includes('discard')) return 'skipped'
   if (s.includes('fail') || s.includes('error') || s.includes('❌')) return 'failed'
+  if (lead._queued || s.includes('bulk')) return 'queued'
+  if (s.includes('ready') || s.includes('📝')) return 'ready'
   if (s.includes('process') || s.includes('⚙') || s.includes('generat')) return 'processing'
   return 'pending'
 }
@@ -91,9 +95,12 @@ type CampaignValue = {
   generating: boolean
   revising: boolean
   sending: boolean
+  sendingIndex: number | null
+  bulkSending: boolean
   currentIndex: number
   livePreview: LivePreview | null
   stagesByLead: Record<number, StageEvent[]>
+  draftsByLead: Record<number, Draft>
   runSender: string
   counts: {
     total: number
@@ -103,6 +110,7 @@ type CampaignValue = {
     processed: number
     skipped: number
     ready: number
+    queued: number
     processing: number
     progressPct: number
   }
@@ -115,11 +123,16 @@ type CampaignValue = {
   uploadLeads: (file: File) => Promise<void>
   removeLead: (index: number) => void
   clearLeads: () => void
-  start: () => Promise<'live'>
+  start: () => Promise<'live' | 'review'>
   stop: () => void
   reset: () => void
+  selectLead: (index: number) => void
   sendCurrent: () => Promise<void>
+  sendLead: (index: number) => Promise<void>
   skipCurrent: () => Promise<void>
+  discardLead: (index: number) => Promise<void>
+  queueLead: (index: number, queued?: boolean) => void
+  sendBulk: () => Promise<void>
   reviseCurrent: (message: string) => Promise<void>
 }
 
@@ -141,16 +154,24 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const [generating, setGenerating] = useState(false)
   const [revising, setRevising] = useState(false)
   const [sending, setSending] = useState(false)
+  const [sendingIndex, setSendingIndex] = useState<number | null>(null)
+  const [bulkSending, setBulkSending] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [livePreview, setLivePreview] = useState<LivePreview | null>(null)
   const [stagesByLead, setStagesByLead] = useState<Record<number, StageEvent[]>>({})
+  const [draftsByLead, setDraftsByLead] = useState<Record<number, Draft>>({})
   const [runSender, setRunSender] = useState('')
 
   const abortRef = useRef<AbortController | null>(null)
   const stopReviewRef = useRef(false)
   const leadsRef = useRef<Lead[]>([])
+  const currentIndexRef = useRef(0)
+  const inflightRef = useRef(0)
+  const draftsRef = useRef<Record<number, Draft>>({})
+  const chatByLeadRef = useRef<Record<number, ChatMessage[]>>({})
   const optsRef = useRef({ template, delay, recipientOverride, senderEmail, autosend, attachProductSheet })
   leadsRef.current = leads
+  currentIndexRef.current = currentIndex
   optsRef.current = { template, delay, recipientOverride, senderEmail, autosend, attachProductSheet }
 
 
@@ -163,6 +184,11 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setChat([])
     setStatus('idle')
     setCurrentIndex(0)
+    setDraftsByLead({})
+    draftsRef.current = {}
+    chatByLeadRef.current = {}
+    setSendingIndex(null)
+    setBulkSending(false)
   }, [])
 
   const removeLead = useCallback((index: number) => {
@@ -179,7 +205,12 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setCurrentIndex(0)
     setLivePreview(null)
     setStagesByLead({})
+    setDraftsByLead({})
+    draftsRef.current = {}
+    chatByLeadRef.current = {}
     setRunSender('')
+    setSendingIndex(null)
+    setBulkSending(false)
   }, [])
 
   const reset = useCallback(() => {
@@ -194,9 +225,15 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setGenerating(false)
     setRevising(false)
     setSending(false)
+    setSendingIndex(null)
+    setBulkSending(false)
     setLivePreview(null)
     setStagesByLead({})
+    setDraftsByLead({})
+    draftsRef.current = {}
+    chatByLeadRef.current = {}
     setRunSender('')
+    inflightRef.current = 0
   }, [])
 
   const stop = useCallback(() => {
@@ -207,7 +244,11 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setLeadStatus = (index: number, st: string) => {
-    setLeads((prev) => prev.map((l, i) => (i === index ? { ...l, _status: st } : l)))
+    setLeads((prev) => {
+      const next = prev.map((l, i) => (i === index ? { ...l, _status: st } : l))
+      leadsRef.current = next
+      return next
+    })
   }
 
   const pushStage = (index: number, evt: StageEvent) => {
@@ -221,17 +262,63 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     })
   }
 
+  const applyLeadChat = (index: number, messages: ChatMessage[]) => {
+    chatByLeadRef.current = { ...chatByLeadRef.current, [index]: messages }
+    if (currentIndexRef.current === index) setChat(messages)
+  }
+
+  const storeDraft = (index: number, d: Draft) => {
+    draftsRef.current = { ...draftsRef.current, [index]: d }
+    setDraftsByLead(draftsRef.current)
+    if (currentIndexRef.current === index) {
+      setDraft(d)
+    }
+  }
+
+  const dropDraft = (index: number) => {
+    const next = { ...draftsRef.current }
+    delete next[index]
+    draftsRef.current = next
+    setDraftsByLead(next)
+    if (currentIndexRef.current === index) {
+      setDraft(null)
+    }
+  }
+
+  const selectLead = useCallback((index: number) => {
+    currentIndexRef.current = index
+    setCurrentIndex(index)
+    const d = draftsRef.current[index]
+    setDraft(d || null)
+    setChat(chatByLeadRef.current[index] || [])
+    const lead = leadsRef.current[index]
+    const html = d?.html || lead?._preview_html || ''
+    if (html) {
+      setLivePreview({
+        rowIndex: index,
+        html,
+        subject: d?.subject || lead?._subject || 'Starlight outreach',
+        company: d?.company || lead?.company,
+        website: d?.website || lead?.website,
+        to: d?.to || lead?._to,
+        from: d?.from || optsRef.current.senderEmail || undefined,
+        productCount: lead?._product_count,
+        productSheet: lead?._product_sheet,
+      })
+    } else {
+      setLivePreview(null)
+    }
+  }, [])
+
   const generateAt = useCallback(async (index: number): Promise<Draft | null> => {
     const lead = leadsRef.current[index]
     if (!leadHasIdentity(lead)) return null
     const opts = optsRef.current
     const companyLabel = String(lead?.company || lead?.name || '').trim()
     const needsDiscover = !String(lead?.website || '').trim()
+
+    inflightRef.current += 1
     setGenerating(true)
-    setDraft(null)
-    setLivePreview(null)
-    setChat([])
-    setCurrentIndex(index)
     setStagesByLead((prev) => ({ ...prev, [index]: [] }))
     setLeadStatus(index, needsDiscover ? '🔎 Finding website…' : '⚙️ Generating…')
 
@@ -264,21 +351,24 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         subject: res.subject,
         html: res.html,
         to: res.to,
+        from: res.from || opts.senderEmail || undefined,
       }
-      setDraft(d)
-      setLivePreview({
-        rowIndex: index,
-        html: res.html,
-        subject: res.subject,
-        company: res.company,
-        website: res.website,
-        to: res.to,
-        from: opts.senderEmail || undefined,
-        productCount: res.product_count,
-        productSheet: res.product_sheet,
-      })
-      setLeads((prev) =>
-        prev.map((l, i) =>
+      storeDraft(index, d)
+      if (currentIndexRef.current === index) {
+        setLivePreview({
+          rowIndex: index,
+          html: res.html,
+          subject: res.subject,
+          company: res.company,
+          website: res.website,
+          to: res.to,
+          from: d.from,
+          productCount: res.product_count,
+          productSheet: res.product_sheet,
+        })
+      }
+      setLeads((prev) => {
+        const next = prev.map((l, i) =>
           i === index
             ? {
                 ...l,
@@ -289,10 +379,16 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
                 _product_sheet: res.product_sheet,
                 _product_count: res.product_count,
                 _discovered: usedDiscover,
+                _draft_id: res.draft_id,
+                _to: res.to,
+                _queued: false,
+                _status: '📝 Ready for review',
               }
             : l,
-        ),
-      )
+        )
+        leadsRef.current = next
+        return next
+      })
       if (usedDiscover) {
         pushStage(index, {
           stage: 'discover',
@@ -311,15 +407,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         pushStage(index, { stage: s.stage, label: s.label, state: 'done' })
       }
       pushStage(index, { stage: 'send', label: 'Send', state: 'active' })
-      setChat([
+      applyLeadChat(index, [
         {
           role: 'system',
           content: usedDiscover
-            ? `Found ${res.website} via OpenSERP for ${res.company || companyLabel}. Review the draft, then Send.`
-            : `Draft ready for ${res.company || res.website}. Tell me what to change, or hit Send.`,
+            ? `Found ${res.website} via OpenSERP for ${res.company || companyLabel}. Send now, add to bulk, or discard.`
+            : `Draft ready for ${res.company || res.website}. Send now, add to bulk, or discard.`,
         },
       ])
-      setLeadStatus(index, '📝 Ready for review')
       setLogs((prev) => [
         ...prev,
         usedDiscover
@@ -333,61 +428,78 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       setLogs((prev) => [...prev, e.message || String(e)])
       return null
     } finally {
-      setGenerating(false)
+      inflightRef.current = Math.max(0, inflightRef.current - 1)
+      if (inflightRef.current === 0) setGenerating(false)
     }
   }, [])
 
-  const advanceReview = useCallback(async (fromIndex: number) => {
-    const list = leadsRef.current
-    for (let i = fromIndex + 1; i < list.length; i++) {
-      if (stopReviewRef.current) {
-        setStatus('stopped')
-        return
-      }
-      if (!leadHasIdentity(list[i])) {
-        setLeadStatus(i, '⏭ Skipped (need company or website)')
-        setLogs((prev) => [...prev, `Skipped lead ${i + 1}: need company or website`])
-        continue
-      }
-      setCurrentIndex(i)
-      const d = await generateAt(i)
-      if (d) {
-        setStatus('reviewing')
-        return
-      }
+  const reviewSettled = () => {
+    if (inflightRef.current > 0) return
+    const open = leadsRef.current.some((l) => {
+      const s = leadState(l)
+      return s === 'ready' || s === 'queued' || s === 'processing' || s === 'pending'
+    })
+    if (!open) {
+      setStatus('done')
+      return
     }
-    setDraft(null)
-    setStatus('done')
-  }, [generateAt])
+    if (stopReviewRef.current) setStatus('stopped')
+  }
 
   const startReview = useCallback(async () => {
     stopReviewRef.current = false
+    inflightRef.current = 0
     setStatus('reviewing')
     setLogs([])
     setStagesByLead({})
     setLivePreview(null)
-    setLeads((prev) =>
-      prev.map((l) => ({
-        ...l,
-        _status: '',
-        _preview_html: '',
-        _subject: '',
-        _discovered: false,
-      })),
-    )
-    for (let i = 0; i < leadsRef.current.length; i++) {
-      if (stopReviewRef.current) {
-        setStatus('stopped')
-        return
-      }
-      if (!leadHasIdentity(leadsRef.current[i])) {
-        setLeadStatus(i, '⏭ Skipped (need company or website)')
-        continue
-      }
-      const d = await generateAt(i)
-      if (d) return
+    setDraft(null)
+    setChat([])
+    setDraftsByLead({})
+    draftsRef.current = {}
+    chatByLeadRef.current = {}
+    setSendingIndex(null)
+    setBulkSending(false)
+
+    const list = leadsRef.current
+    const jobs: number[] = []
+    for (let i = 0; i < list.length; i++) {
+      if (leadHasIdentity(list[i])) jobs.push(i)
     }
-    setStatus('done')
+    setLeads((prev) => {
+      const next = prev.map((l) => {
+        const skip = !leadHasIdentity(l)
+        return {
+          ...l,
+          _status: skip ? '⏭ Skipped (need company or website)' : '⏳ Waiting to generate',
+          _preview_html: '',
+          _subject: '',
+          _discovered: false,
+          _queued: false,
+          _draft_id: '',
+          _to: '',
+        }
+      })
+      leadsRef.current = next
+      return next
+    })
+
+    const first = jobs[0] ?? 0
+    currentIndexRef.current = first
+    setCurrentIndex(first)
+
+    let cursor = 0
+    const worker = async () => {
+      while (cursor < jobs.length) {
+        if (stopReviewRef.current) return
+        const i = jobs[cursor]
+        cursor += 1
+        await generateAt(i)
+      }
+    }
+    const n = Math.min(GEN_CONCURRENCY, jobs.length)
+    await Promise.all(Array.from({ length: n }, () => worker()))
+    reviewSettled()
   }, [generateAt])
 
   const startAutosend = useCallback(async () => {
@@ -511,96 +623,186 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const start = useCallback(async (): Promise<'live'> => {
+  const start = useCallback(async (): Promise<'live' | 'review'> => {
     if (optsRef.current.autosend) {
       void startAutosend()
-    } else {
-      void startReview()
+      return 'live'
     }
-    return 'live'
+    void startReview()
+    return 'review'
   }, [startAutosend, startReview])
 
-  const sendCurrent = useCallback(async () => {
-    if (!draft) return
+  const sendLead = useCallback(async (index: number) => {
+    const d = draftsRef.current[index]
+    if (!d) return
     setSending(true)
+    setSendingIndex(index)
     try {
-      await api.campaignSend(draft.draftId)
-      pushStage(draft.rowIndex, { stage: 'send', label: 'Send', state: 'done' })
-      setLeadStatus(draft.rowIndex, '✅ Sent')
-      setChat((prev) => [...prev, { role: 'assistant', content: `Sent to ${draft.to || 'recipient'}.` }])
-      setDraft(null)
-      setLivePreview(null)
-      await advanceReview(draft.rowIndex)
+      await api.campaignSend(d.draftId)
+      pushStage(index, { stage: 'send', label: 'Send', state: 'done' })
+      setLeads((prev) => {
+        const next = prev.map((l, i) => (i === index ? { ...l, _status: '✅ Sent', _queued: false } : l))
+        leadsRef.current = next
+        return next
+      })
+      const nextChat = [
+        ...(chatByLeadRef.current[index] || []),
+        { role: 'assistant' as const, content: `Sent to ${d.to || 'recipient'}.` },
+      ]
+      applyLeadChat(index, nextChat)
+      dropDraft(index)
+      setLogs((prev) => [...prev, `Sent · ${d.company || d.website || `lead ${index + 1}`}`])
     } catch (e: any) {
-      pushStage(draft.rowIndex, { stage: 'send', label: 'Send', state: 'error' })
-      setLeadStatus(draft.rowIndex, `❌ ${e.message || 'Send failed'}`)
-      setChat((prev) => [...prev, { role: 'assistant', content: e.message || 'Send failed' }])
+      pushStage(index, { stage: 'send', label: 'Send', state: 'error' })
+      setLeadStatus(index, `❌ ${e.message || 'Send failed'}`)
+      const nextChat = [
+        ...(chatByLeadRef.current[index] || []),
+        { role: 'assistant' as const, content: e.message || 'Send failed' },
+      ]
+      applyLeadChat(index, nextChat)
     } finally {
       setSending(false)
+      setSendingIndex((cur) => (cur === index ? null : cur))
+      reviewSettled()
     }
-  }, [draft, advanceReview])
+  }, [])
+
+  const sendCurrent = useCallback(async () => {
+    await sendLead(currentIndexRef.current)
+  }, [sendLead])
+
+  const discardLead = useCallback(async (index: number) => {
+    const d = draftsRef.current[index]
+    if (d) {
+      try {
+        await api.campaignDiscard(d.draftId)
+      } catch {
+        /* ignore */
+      }
+    }
+    setLeads((prev) => {
+      const next = prev.map((l, i) => (i === index ? { ...l, _status: '⏭ Discarded', _queued: false } : l))
+      leadsRef.current = next
+      return next
+    })
+    dropDraft(index)
+    setLogs((prev) => [...prev, `Discarded lead ${index + 1}`])
+    reviewSettled()
+  }, [])
 
   const skipCurrent = useCallback(async () => {
-    if (!draft) return
+    await discardLead(currentIndexRef.current)
+  }, [discardLead])
+
+  const queueLead = useCallback((index: number, queued?: boolean) => {
+    const d = draftsRef.current[index]
+    if (!d) return
+    const lead = leadsRef.current[index]
+    const queuedNow = queued ?? !lead?._queued
+    setLeads((prev) => {
+      const updated = prev.map((l, i) =>
+        i === index
+          ? {
+              ...l,
+              _queued: queuedNow,
+              _status: queuedNow ? '📦 In bulk send' : '📝 Ready for review',
+            }
+          : l,
+      )
+      leadsRef.current = updated
+      return updated
+    })
+  }, [])
+
+  const sendBulk = useCallback(async () => {
+    const ids = leadsRef.current
+      .map((l, i) => ({ l, i }))
+      .filter(({ l, i }) => Boolean(l._queued) && draftsRef.current[i])
+      .map(({ i }) => i)
+    if (!ids.length) return
+    stopReviewRef.current = false
+    setBulkSending(true)
+    setSending(true)
     try {
-      await api.campaignDiscard(draft.draftId)
-    } catch {
-      /* ignore */
+      for (let n = 0; n < ids.length; n++) {
+        if (stopReviewRef.current) break
+        await sendLead(ids[n])
+        if (n < ids.length - 1 && !stopReviewRef.current) {
+          const wait = Math.max(0, optsRef.current.delay) * 1000
+          if (wait) await new Promise((r) => setTimeout(r, wait))
+        }
+      }
+    } finally {
+      setBulkSending(false)
+      setSending(false)
+      reviewSettled()
     }
-    setLeadStatus(draft.rowIndex, '⏭ Skipped')
-    setDraft(null)
-    setLivePreview(null)
-    await advanceReview(draft.rowIndex)
-  }, [draft, advanceReview])
+  }, [sendLead])
 
   const reviseCurrent = useCallback(async (message: string) => {
-    if (!draft || !message.trim()) return
+    const index = currentIndexRef.current
+    const d = draftsRef.current[index]
+    if (!d || !message.trim()) return
     setRevising(true)
-    setChat((prev) => [...prev, { role: 'user', content: message.trim() }])
+    const withUser = [
+      ...(chatByLeadRef.current[index] || []),
+      { role: 'user' as const, content: message.trim() },
+    ]
+    applyLeadChat(index, withUser)
     try {
-      const res = await api.campaignRevise(draft.draftId, message.trim())
-      setDraft((d) => (d ? { ...d, subject: res.subject, html: res.html } : d))
+      const res = await api.campaignRevise(d.draftId, message.trim())
+      const updated: Draft = { ...d, subject: res.subject, html: res.html }
+      storeDraft(index, updated)
       setLivePreview((p) =>
-        p && p.rowIndex === draft.rowIndex
+        p && p.rowIndex === index
           ? { ...p, html: res.html, subject: res.subject }
           : {
-              rowIndex: draft.rowIndex,
+              rowIndex: index,
               html: res.html,
               subject: res.subject,
-              company: draft.company,
-              website: draft.website,
-              to: draft.to,
+              company: d.company,
+              website: d.website,
+              to: d.to,
+              from: d.from,
             },
       )
       setLeads((prev) =>
         prev.map((l, i) =>
-          i === draft.rowIndex ? { ...l, _preview_html: res.html, _subject: res.subject } : l,
+          i === index ? { ...l, _preview_html: res.html, _subject: res.subject } : l,
         ),
       )
-      setChat((prev) => [...prev, { role: 'assistant', content: 'Updated — check the preview.' }])
+      applyLeadChat(index, [
+        ...withUser,
+        { role: 'assistant', content: 'Updated — check the preview.' },
+      ])
     } catch (e: any) {
-      setChat((prev) => [...prev, { role: 'assistant', content: e.message || 'Could not revise' }])
+      applyLeadChat(index, [
+        ...withUser,
+        { role: 'assistant', content: e.message || 'Could not revise' },
+      ])
     } finally {
       setRevising(false)
     }
-  }, [draft])
+  }, [])
 
   const counts = useMemo(() => {
     let sent = 0
     let failed = 0
     let skipped = 0
     let ready = 0
+    let queued = 0
     let processing = 0
     for (const l of leads) {
       const s = leadState(l)
       if (s === 'sent') sent += 1
       else if (s === 'failed') failed += 1
       else if (s === 'skipped') skipped += 1
+      else if (s === 'queued') queued += 1
       else if (s === 'ready') ready += 1
       else if (s === 'processing') processing += 1
     }
     const finished = sent + failed + skipped
-    const progressed = finished + ready + processing * 0.55
+    const progressed = finished + ready + queued + processing * 0.55
     const total = leads.length
     return {
       total,
@@ -608,8 +810,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       failed,
       skipped,
       ready,
+      queued,
       processing,
-      pending: Math.max(0, total - finished - ready - processing),
+      pending: Math.max(0, total - finished - ready - queued - processing),
       processed: finished,
       progressPct: total ? Math.min(100, Math.round((progressed / total) * 100)) : 0,
     }
@@ -631,9 +834,12 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     generating,
     revising,
     sending,
+    sendingIndex,
+    bulkSending,
     currentIndex,
     livePreview,
     stagesByLead,
+    draftsByLead,
     runSender,
     counts,
     setTemplate,
@@ -648,8 +854,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     start,
     stop,
     reset,
+    selectLead,
     sendCurrent,
+    sendLead,
     skipCurrent,
+    discardLead,
+    queueLead,
+    sendBulk,
     reviseCurrent,
   }
 

@@ -101,6 +101,7 @@ export function CampaignLivePage() {
   }, [draft?.rowIndex, livePreview?.rowIndex, currentIndex, status])
 
   if (!leads.length) return <Navigate to="/campaigns" replace />
+  if (status === 'reviewing') return <Navigate to="/campaigns/review" replace />
 
   const running = status === 'running'
   const reviewing = status === 'reviewing'

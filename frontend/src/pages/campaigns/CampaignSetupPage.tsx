@@ -86,8 +86,8 @@ export function CampaignSetupPage() {
   const launch = async () => {
     setLaunching(true)
     try {
-      await start()
-      nav('/campaigns/live')
+      const dest = await start()
+      nav(dest === 'live' ? '/campaigns/live' : '/campaigns/review')
     } finally {
       setLaunching(false)
     }
@@ -100,12 +100,16 @@ export function CampaignSetupPage() {
       <div className="page-hero">
         <div>
           <h1>Campaigns</h1>
-          <p>Upload leads, choose a look, then start — review and send on the live progress page.</p>
+          <p>Upload leads, choose a look, then generate every email at once — review, send now, or bulk send.</p>
         </div>
         <div className="row">
           {inFlight ? (
-            <button className="btn" type="button" onClick={() => nav('/campaigns/live')}>
-              View Live progress Logs
+            <button
+              className="btn"
+              type="button"
+              onClick={() => nav(status === 'running' ? '/campaigns/live' : '/campaigns/review')}
+            >
+              {status === 'running' ? 'View Live progress Logs' : 'Review emails'}
             </button>
           ) : (
             <button
@@ -256,7 +260,7 @@ export function CampaignSetupPage() {
 
             {!autosend ? (
               <div className="alert warn" style={{ margin: 0 }}>
-                You'll review and send each email on <strong>Live progress Logs</strong> after you hit Start campaign.
+                All emails are generated together. Open the review board to send now, add to bulk send, or discard.
               </div>
             ) : (
               <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
@@ -274,22 +278,20 @@ export function CampaignSetupPage() {
               />
             </label>
 
-            {autosend ? (
-              <label className="field">
-                <span>Pause between sends</span>
-                <div className="row" style={{ gap: '0.75rem' }}>
-                  <input
-                    type="range"
-                    min={1}
-                    max={15}
-                    value={delay}
-                    onChange={(e) => setDelay(Number(e.target.value))}
-                    style={{ flex: 1 }}
-                  />
-                  <span className="pill">{delay}s</span>
-                </div>
-              </label>
-            ) : null}
+            <label className="field">
+              <span>{autosend ? 'Pause between sends' : 'Pause between bulk sends'}</span>
+              <div className="row" style={{ gap: '0.75rem' }}>
+                <input
+                  type="range"
+                  min={1}
+                  max={15}
+                  value={delay}
+                  onChange={(e) => setDelay(Number(e.target.value))}
+                  style={{ flex: 1 }}
+                />
+                <span className="pill">{delay}s</span>
+              </div>
+            </label>
           </div>
 
           {leads.length ? (
