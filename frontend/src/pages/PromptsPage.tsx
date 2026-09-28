@@ -178,7 +178,7 @@ export function PromptsPage() {
               {selected.key === 'draft_system' ? (
                 <div className="alert warn" style={{ margin: 0 }}>
                   Keep JSON keys <code>subject, preamble, opening_line, intro, feature_highlights, use_cases, cta</code>.
-                  Changing to other key names empties campaign emails.
+                  <code>opening_line</code> should greet the client from CLIENT DATA (Hey {'{client}'}, …). Changing key names empties campaign emails.
                 </div>
               ) : null}
 

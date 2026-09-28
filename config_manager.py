@@ -31,7 +31,7 @@ _BUILTIN_TEMPLATES = {
 _TEMPLATE_VARIABLES = [
     {"name": "subject", "description": "Email subject line"},
     {"name": "preamble", "description": "Short tagline below header"},
-    {"name": "opening_line", "description": "Opening greeting line"},
+    {"name": "opening_line", "description": "Opening greeting (Hey {client}, …)"},
     {"name": "intro_paragraph", "description": "Main intro paragraph (HTML safe)"},
     {"name": "feature_highlights", "description": "List of feature bullet strings"},
     {"name": "use_cases", "description": "List of use-case bullet strings"},
@@ -52,7 +52,7 @@ _TEMPLATE_VARIABLES = [
 _SAMPLE_PREVIEW_DATA = {
     "subject": "Illuminating Your Next Hospitality Project",
     "preamble": "Precision-engineered LED solutions",
-    "opening_line": "Hope this email finds you well.",
+    "opening_line": "Hey Studio team, we have been following your hospitality work.",
     "intro_paragraph": (
         "We admire your portfolio of boutique hotel interiors and believe "
         "Starlight's linear LED systems would complement your design language."
@@ -129,6 +129,57 @@ def _load_defaults() -> dict:
         return json.load(f)
 
 
+_STALE_STOCK_PROMPTS = {
+    "draft_system": (
+        "You are writing cold outreach on behalf of Starlight Linear LED, an architectural linear lighting manufacturer with 15 years of manufacturing depth, based near Pune. Write quiet, precise, assured copy — introducing a manufacturer that belongs in the reader's reference set.\n\n"
+        "THE READER: An Indian architect, interior designer, or lighting specifier.\n\n"
+        "Core Principles:\n"
+        "1. Ground suggestions in product names and applications from the CATALOGUE CONTEXT.\n"
+        "2. Relationship-building tone; avoid dense spec dumps.\n"
+        "3. If catalogue context says no products were found, do NOT invent product names.\n\n"
+        "Return ONLY a JSON object with these exact keys (all required, non-empty):\n"
+        "{\n"
+        '  "subject": "string",\n'
+        '  "preamble": "string (≤12 word tagline)",\n'
+        '  "opening_line": "string (warm observation about their work)",\n'
+        '  "intro": "string (1–2 sentences: who Starlight is + why relevant, mention real catalogue products)",\n'
+        '  "feature_highlights": ["string", "string", "string"],\n'
+        '  "use_cases": ["string", "string"],\n'
+        '  "cta": "string (soft ask — studio visit or call)"\n'
+        "}\n"
+        "Do not use alternate keys like opening_observation, positioning_line, or ask."
+    ),
+    "draft_user": (
+        "Write the JSON email draft using ONLY the keys subject, preamble, opening_line, intro, feature_highlights, use_cases, cta.\n\n"
+        "CATALOGUE CONTEXT:\n"
+        "---\n"
+        "{rag_context}\n"
+        "---\n\n"
+        "CLIENT DATA:\n"
+        "{client_json}"
+    ),
+}
+
+
+def _upgrade_stock_prompts(config: dict) -> dict:
+    """Replace unmodified stock email prompts so greeting instructions land without wiping Prompt Studio edits."""
+    defaults = _load_defaults().get("prompts", {})
+    prompts = config.setdefault("prompts", {})
+    for key, stale in _STALE_STOCK_PROMPTS.items():
+        entry = prompts.get(key)
+        content = entry.get("content", "") if isinstance(entry, dict) else entry or ""
+        if content.replace("\r\n", "\n").strip() != stale.replace("\r\n", "\n").strip():
+            continue
+        fresh = defaults.get(key, {}).get("content", "")
+        if not fresh:
+            continue
+        if not isinstance(entry, dict):
+            prompts[key] = copy.deepcopy(defaults.get(key, {"content": fresh}))
+        else:
+            entry["content"] = fresh
+    return config
+
+
 def _load_org_config(organization_id: str | None = None) -> dict:
     org = _org_id(organization_id)
     with _lock:
@@ -146,6 +197,7 @@ def _load_org_config(organization_id: str | None = None) -> dict:
                 config = json.load(f)
         else:
             config = copy.deepcopy(_load_defaults())
+    config = _upgrade_stock_prompts(config)
     with _lock:
         _cache[org] = copy.deepcopy(config)
     return copy.deepcopy(config)

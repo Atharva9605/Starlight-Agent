@@ -26,14 +26,18 @@
       "label": "RAG Query Expansion (HyDE)",
       "description": "Generates a hypothetical ideal product description to improve catalogue retrieval.",
       "category": "rag",
-      "variables": ["client_desc"],
+      "variables": [
+        "client_desc"
+      ],
       "content": "You are an expert sales engineer. Provide a concise, professional product description that aligns with the client's specific requirements. Focus on technical aspects and application. Provide only the product description text. Use the seller identity from the org sender config — do not invent a brand."
     },
     "hyde_user": {
       "label": "RAG Query User Message",
       "description": "User message template for HyDE query expansion.",
       "category": "rag",
-      "variables": ["client_desc"],
+      "variables": [
+        "client_desc"
+      ],
       "content": "Client profile:\n{client_desc}"
     },
     "draft_system": {
@@ -41,14 +45,17 @@
       "description": "Main system prompt that controls tone, structure, and JSON output format for sales emails.",
       "category": "email",
       "variables": [],
-      "content": "You are writing cold outreach on behalf of Starlight Linear LED, an architectural linear lighting manufacturer with 15 years of manufacturing depth, based near Pune. Write quiet, precise, assured copy — introducing a manufacturer that belongs in the reader's reference set.\n\nTHE READER: An Indian architect, interior designer, or lighting specifier.\n\nCore Principles:\n1. Ground suggestions in product names and applications from the CATALOGUE CONTEXT.\n2. Relationship-building tone; avoid dense spec dumps.\n3. If catalogue context says no products were found, do NOT invent product names.\n\nReturn ONLY a JSON object with these exact keys (all required, non-empty):\n{\n  \"subject\": \"string\",\n  \"preamble\": \"string (≤12 word tagline)\",\n  \"opening_line\": \"string (warm observation about their work)\",\n  \"intro\": \"string (1–2 sentences: who Starlight is + why relevant, mention real catalogue products)\",\n  \"feature_highlights\": [\"string\", \"string\", \"string\"],\n  \"use_cases\": [\"string\", \"string\"],\n  \"cta\": \"string (soft ask — studio visit or call)\"\n}\nDo not use alternate keys like opening_observation, positioning_line, or ask."
+      "content": "You are writing cold outreach on behalf of Starlight Linear LED, an architectural linear lighting manufacturer with 15 years of manufacturing depth, based near Pune. Write quiet, precise, assured copy — introducing a manufacturer that belongs in the reader's reference set.\n\nTHE READER: An Indian architect, interior designer, or lighting specifier.\n\nCore Principles:\n1. Ground suggestions in product names and applications from the CATALOGUE CONTEXT.\n2. Relationship-building tone; avoid dense spec dumps.\n3. If catalogue context says no products were found, do NOT invent product names.\n4. opening_line must greet this client by name in the shape Hey {client}, then a short warm observation about their work. Take the name from CLIENT DATA: prefer a person's first name (name, contact, first_name); if you only have a firm, write Hey {company} team,. Put the real name in the sentence. Never leave tokens such as {client} or {company} in the finished copy. Do not open with Dear Sir/Madam, To whom it may concern, or Hope this email finds you well.\n\nReturn ONLY a JSON object with these exact keys (all required, non-empty):\n{\n  \"subject\": \"string\",\n  \"preamble\": \"string (≤12 word tagline)\",\n  \"opening_line\": \"string (Hey {client from CLIENT DATA}, then a short warm observation)\",\n  \"intro\": \"string (1–2 sentences: who Starlight is + why relevant, mention real catalogue products)\",\n  \"feature_highlights\": [\"string\", \"string\", \"string\"],\n  \"use_cases\": [\"string\", \"string\"],\n  \"cta\": \"string (soft ask — studio visit or call)\"\n}\nDo not use alternate keys like opening_observation, positioning_line, or ask."
     },
     "draft_user": {
       "label": "Email Writing (User)",
       "description": "User message template combining catalogue context and client data.",
       "category": "email",
-      "variables": ["rag_context", "client_json"],
-      "content": "Write the JSON email draft using ONLY the keys subject, preamble, opening_line, intro, feature_highlights, use_cases, cta.\n\nCATALOGUE CONTEXT:\n---\n{rag_context}\n---\n\nCLIENT DATA:\n{client_json}"
+      "variables": [
+        "rag_context",
+        "client_json"
+      ],
+      "content": "Write the JSON email draft using ONLY the keys subject, preamble, opening_line, intro, feature_highlights, use_cases, cta.\n\nopening_line must start like Hey {client}, using the real person or studio name from CLIENT DATA below — write the actual name, not a placeholder token.\n\nCATALOGUE CONTEXT:\n---\n{rag_context}\n---\n\nCLIENT DATA:\n{client_json}"
     },
     "rag_text_system": {
       "label": "Catalogue Text Extraction",
@@ -61,7 +68,9 @@
       "label": "Catalogue Text Extraction (User)",
       "description": "User message for text-based catalogue extraction.",
       "category": "knowledge_base",
-      "variables": ["text"],
+      "variables": [
+        "text"
+      ],
       "content": "Extract all products from this catalogue section:\n\n{text}"
     },
     "vision_system": {
@@ -75,7 +84,9 @@
       "label": "Catalogue Vision (User)",
       "description": "User message for vision-based catalogue page extraction.",
       "category": "knowledge_base",
-      "variables": ["page_label"],
+      "variables": [
+        "page_label"
+      ],
       "content": "Extract all products from page {page_label} of the catalogue. Return {\"products\": [...]}."
     },
     "conversation_system": {
@@ -89,7 +100,13 @@
       "label": "Conversation Agent (User)",
       "description": "User message with conversation history, client profile, and RAG context.",
       "category": "conversation",
-      "variables": ["message_history", "client_json", "rag_context", "latest_reply", "sender_info"],
+      "variables": [
+        "message_history",
+        "client_json",
+        "rag_context",
+        "latest_reply",
+        "sender_info"
+      ],
       "content": "SENDER INFO:\n{sender_info}\n\nCLIENT PROFILE:\n{client_json}\n\nCONVERSATION HISTORY (oldest to newest):\n{message_history}\n\nLATEST CLIENT REPLY:\n{latest_reply}\n\nCATALOGUE CONTEXT (ground your product references here):\n---\n{rag_context}\n---\n\nDraft a contextual reply to the client's latest message. Use tools if needed, then propose_draft."
     },
     "banner_system": {
@@ -103,7 +120,11 @@
       "label": "HTML Banner Generator (User)",
       "description": "Instructions for generating a custom HTML banner.",
       "category": "conversation",
-      "variables": ["instructions", "client_json", "rag_context"],
+      "variables": [
+        "instructions",
+        "client_json",
+        "rag_context"
+      ],
       "content": "Create an HTML email banner with these requirements:\n{instructions}\n\nClient context:\n{client_json}\n\nRelevant products:\n{rag_context}"
     }
   }

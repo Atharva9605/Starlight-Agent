@@ -105,7 +105,7 @@ def test_fixtures_roundtrip() -> None:
     data = {
         "subject": "Lighting for your hospitality portfolio",
         "preamble": "Engineered for ambience",
-        "opening_line": "Hope you are well.",
+        "opening_line": "Hey Studio team, we have been following your hospitality work.",
         "intro": "Your recent hotel lobby project stood out.",
         "feature_highlights": ["High CRI", "Custom lengths"],
         "use_cases": ["Lobby coves"],

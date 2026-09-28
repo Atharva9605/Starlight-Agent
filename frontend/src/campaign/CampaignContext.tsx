@@ -90,6 +90,27 @@ function leadState(lead: Lead): 'sent' | 'failed' | 'processing' | 'pending' | '
   return 'pending'
 }
 
+function isFailedLead(lead: Lead | undefined | null): boolean {
+  if (!lead) return false
+  const st = leadState(lead)
+  return st === 'failed' || (st === 'processing' && Boolean(lead._failed_website))
+}
+
+function firstPreviewIndex(leads: Lead[], skip?: number): number {
+  const ok = (l: Lead, i: number) => i !== skip && !isFailedLead(l)
+  const ready = leads.findIndex(
+    (l, i) => ok(l, i) && (leadState(l) === 'ready' || leadState(l) === 'queued'),
+  )
+  if (ready >= 0) return ready
+  const writing = leads.findIndex((l, i) => {
+    if (!ok(l, i)) return false
+    const st = leadState(l)
+    return st === 'processing' || st === 'pending'
+  })
+  if (writing >= 0) return writing
+  return leads.findIndex((l, i) => ok(l, i))
+}
+
 function isTransientGenerateError(message: string): boolean {
   return /429|502|503|504|timeout|timed out|failed to fetch|network|econnreset|overload|rate limit/i.test(
     message,
@@ -579,6 +600,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         },
       ])
       setLogs((prev) => [...prev, `Lead ${index + 1} failed: ${err}`])
+      if (currentIndexRef.current === index) {
+        const next = firstPreviewIndex(leadsRef.current, index)
+        if (next >= 0) selectLead(next)
+      }
       return null
     } finally {
       inflightRef.current = Math.max(0, inflightRef.current - 1)
@@ -1173,4 +1198,4 @@ export function useCampaign() {
   return v
 }
 
-export { leadState }
+export { leadState, isFailedLead, firstPreviewIndex }

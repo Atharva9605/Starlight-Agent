@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { EmailPreviewFrame } from '../../components/EmailPreviewFrame'
-import { leadState, useCampaign, type Lead } from '../../campaign/CampaignContext'
+import {
+  firstPreviewIndex,
+  isFailedLead,
+  leadState,
+  useCampaign,
+  type Lead,
+} from '../../campaign/CampaignContext'
 
 function leadTitle(lead: Lead | undefined, fallback: string) {
   return lead?.company || lead?.name || lead?.website || fallback
@@ -89,11 +95,19 @@ export function CampaignReviewPage() {
 
   const [input, setInput] = useState('')
   const [bulkInput, setBulkInput] = useState('')
+  const [failedPick, setFailedPick] = useState<number | null>(null)
   const chatEnd = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chat.length, revising, currentIndex])
+
+  useEffect(() => {
+    if (!leads.length) return
+    if (!isFailedLead(leads[currentIndex])) return
+    const next = firstPreviewIndex(leads, currentIndex)
+    if (next >= 0 && next !== currentIndex) selectLead(next)
+  }, [leads, currentIndex, selectLead])
 
   if (!leads.length) return <Navigate to="/campaigns" replace />
   if (status === 'running') return <Navigate to="/campaigns/live" replace />
@@ -296,9 +310,14 @@ export function CampaignReviewPage() {
             </button>
           </div>
           <div className="mail-inbox-list">
-            {leads.map((l, i) => {
+            {leads.every((l) => isFailedLead(l)) ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                Failed emails stay in the list below — this preview only shows drafts that can be reviewed.
+              </p>
+            ) : (
+              leads.map((l, i) => {
               const st = leadState(l)
-              if (st === 'failed' || (st === 'processing' && l._failed_website)) return null
+              if (isFailedLead(l)) return null
               const d = draftsByLead[i]
               const subject = cardSubject(l, d?.subject || l._subject, st)
               const to = d?.to || l._to
@@ -344,7 +363,8 @@ export function CampaignReviewPage() {
                   </span>
                 </div>
               )
-            })}
+            })
+            )}
           </div>
         </aside>
 
@@ -364,7 +384,7 @@ export function CampaignReviewPage() {
             </button>
           </div>
           <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
-            Every failed lead stays here. Retry looks up a working site with OpenSERP, then writes the email.
+            Every failed lead stays here, not in the preview. Retry looks up a working site with OpenSERP, then writes the email.
           </p>
           <div className="mail-inbox-list">
             {counts.failed === 0 ? (
@@ -380,12 +400,12 @@ export function CampaignReviewPage() {
                     key={`fail-${i}`}
                     role="button"
                     tabIndex={0}
-                    className={`mail-card failed${i === currentIndex ? ' active' : ''}${retrying ? ' queued' : ''}`}
-                    onClick={() => selectLead(i)}
+                    className={`mail-card failed${i === failedPick ? ' active' : ''}${retrying ? ' queued' : ''}`}
+                    onClick={() => setFailedPick(i)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
-                        selectLead(i)
+                        setFailedPick(i)
                       }
                     }}
                   >
@@ -412,7 +432,7 @@ export function CampaignReviewPage() {
                       disabled={acting || retrying}
                       onClick={(e) => {
                         e.stopPropagation()
-                        selectLead(i)
+                        setFailedPick(i)
                         void retryLead(i)
                       }}
                     >
@@ -446,65 +466,35 @@ export function CampaignReviewPage() {
               <span className={`pill ${pillClass(focusState)}`}>{focus ? stateLabel(focus) : '—'}</span>
             </div>
 
-            {previewHtml ? (
+            {previewHtml && !isFailedLead(focus) ? (
               <div className="mail-reader-preview">
                 <EmailPreviewFrame html={previewHtml} subject={previewSubject} fromLabel={fromLabel} fullscreen />
               </div>
-            ) : focusState === 'failed' ? (
-              <div className="mail-fail-panel">
-                <strong>This email failed to generate</strong>
-                <p className="muted" style={{ margin: '0.45rem 0 0', maxWidth: '52ch' }}>
-                  {cleanStatus(focus?._error || focus?._status) ||
-                    'The website could not be scraped or the draft could not be written.'}
-                </p>
-                {focus?._failed_website || focus?.website ? (
-                  <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: 13 }}>
-                    Sheet URL: {String(focus._failed_website || focus.website)}
-                    {focus._failed_website && focus.website && focus.website !== focus._failed_website
-                      ? ` · tried ${focus.website}`
-                      : ''}
-                  </p>
-                ) : null}
-                <div className="row" style={{ marginTop: 16, gap: 8 }}>
-                  <button
-                    className="btn"
-                    type="button"
-                    disabled={acting}
-                    onClick={() => void retryLead(currentIndex)}
-                  >
-                    Retry via OpenSERP
-                  </button>
-                  <button
-                    className="btn secondary"
-                    type="button"
-                    disabled={acting}
-                    onClick={() => void discardLead(currentIndex)}
-                  >
-                    Discard
-                  </button>
-                </div>
-              </div>
             ) : (
               <div className="skeleton-frame tall live-preview-empty">
-                {focusState === 'processing' ? <div className="live-pulse-ring" /> : null}
+                {focusState === 'processing' && !isFailedLead(focus) ? <div className="live-pulse-ring" /> : null}
                 <strong>
-                  {focusState === 'processing'
-                    ? `Writing email ${currentIndex + 1} of ${counts.total}…`
-                    : focusState === 'skipped'
-                      ? 'This email was discarded'
-                      : focusState === 'sent'
-                        ? 'This email was sent'
-                        : 'Preview appears here when the draft is ready'}
+                  {isFailedLead(focus)
+                    ? 'Open a ready card to preview'
+                    : focusState === 'processing'
+                      ? `Writing email ${currentIndex + 1} of ${counts.total}…`
+                      : focusState === 'skipped'
+                        ? 'This email was discarded'
+                        : focusState === 'sent'
+                          ? 'This email was sent'
+                          : 'Preview appears here when the draft is ready'}
                 </strong>
                 <p className="muted" style={{ margin: '0.4rem 0 0', maxWidth: '42ch' }}>
-                  {focusState === 'processing'
-                    ? 'This lead is being scraped and written. Other emails can still be reviewed.'
-                    : 'Open any ready card on the left to preview, send, or add it to bulk.'}
+                  {isFailedLead(focus)
+                    ? 'Failed emails are listed separately and are not shown in this preview.'
+                    : focusState === 'processing'
+                      ? 'This lead is being scraped and written. Other emails can still be reviewed.'
+                      : 'Open any ready card on the left to preview, send, or add it to bulk.'}
                 </p>
               </div>
             )}
 
-            {focusState === 'failed' ? null : (
+            {isFailedLead(focus) ? null : (
             <div className="mail-actions">
               <button
                 className="btn danger"

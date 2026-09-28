@@ -378,13 +378,15 @@ Tone and Style:
 - Clear and easy to read.
 - Use plain text for links (no raw HTML).
 - Subject: Engaging and relevant to their industry.
-- Salutation: Personalized to the team or firm.
+- opening_line: greet the client by name in the shape Hey {client}, then a short observation.
+  Use their first name from CLIENT DATA when present; otherwise Hey {company} team,.
+  Write the real name — never leave a {client} token in the output.
 
 Expected Output Format (JSON):
 {
   "subject": "string",
   "preamble": "string (one elegant tagline, ≤12 words)",
-  "opening_line": "string",
+  "opening_line": "string (Hey {client}, then a short warm observation)",
   "intro": "string (1–2 sentences on their projects and our synergy)",
   "feature_highlights": ["string", "string", "string"],
   "use_cases": ["string", "string"],
