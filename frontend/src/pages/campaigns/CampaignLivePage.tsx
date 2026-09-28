@@ -104,8 +104,7 @@ export function CampaignLivePage() {
   if (status === 'reviewing') return <Navigate to="/campaigns/review" replace />
 
   const running = status === 'running'
-  const reviewing = status === 'reviewing'
-  const activeRun = running || reviewing || generating
+  const activeRun = running || generating
   const pct = counts.progressPct
   const busy = generating || revising || sending
   const left = Math.max(0, counts.total - counts.processed)
@@ -133,7 +132,7 @@ export function CampaignLivePage() {
   const productSheet = livePreview?.productSheet || focus?._product_sheet || ''
   const productCount = livePreview?.productCount ?? focus?._product_count ?? 0
   const activeStep = timeline.find((s) => s.state === 'active') || timeline.find((s) => s.state === 'pending')
-  const canReview = Boolean(draft) && draft!.rowIndex === focusIdx && (reviewing || focusState === 'ready')
+  const canReview = !!draft && draft.rowIndex === focusIdx && focusState === 'ready'
   const pathHint = includeDiscover
     ? 'Company → OpenSERP → scrape → draft → send'
     : 'Website → scrape → draft → send'
