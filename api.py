@@ -1067,9 +1067,13 @@ async def campaign_generate(req: CampaignGenerateRequest):
 
     scraped_data = await run_in_thread(scrape_and_process, website)
     if not scraped_data:
-        raise HTTPException(status_code=400, detail="Scraper failed for this website.")
-
-    _apply_recipient(scraped_data, recipient_override=req.recipient_override, lead=lead)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Could not reach {website}. The site may be down, blocking scrapes, "
+                "or the URL may be wrong."
+            ),
+        )
     company_hint = clean_lead_value(lead.get("company")) or lead_search_name(lead)
     if company_hint:
         scraped_data.setdefault("company", company_hint)

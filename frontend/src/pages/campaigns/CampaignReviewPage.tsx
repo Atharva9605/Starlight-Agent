@@ -35,6 +35,23 @@ function pillClass(st: ReturnType<typeof leadState>) {
   return ''
 }
 
+function cleanStatus(status?: string) {
+  return String(status || '')
+    .replace(/^[❌⏭⚙️🔎📝📦⏳🔁✅\s]+/u, '')
+    .trim()
+}
+
+function cardSubject(lead: Lead, subject: string | undefined, st: ReturnType<typeof leadState>) {
+  if (subject) return subject
+  if (st === 'processing') return lead._status || 'Writing…'
+  if (st === 'failed') return cleanStatus(lead._error || lead._status) || 'Could not generate'
+  if (st === 'sent') return 'Sent'
+  if (st === 'skipped') return 'Discarded'
+  return 'Waiting…'
+}
+
+type InboxFilter = 'all' | 'ready' | 'failed'
+
 /** Review every generated email — send now, queue for bulk, or discard. */
 export function CampaignReviewPage() {
   const nav = useNavigate()
@@ -56,6 +73,8 @@ export function CampaignReviewPage() {
     discardLead,
     queueLead,
     sendBulk,
+    retryLead,
+    retryFailed,
     reviseCurrent,
     selectLead,
     stop,
@@ -63,6 +82,7 @@ export function CampaignReviewPage() {
   } = useCampaign()
 
   const [input, setInput] = useState('')
+  const [filter, setFilter] = useState<InboxFilter>('all')
   const chatEnd = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -160,6 +180,16 @@ export function CampaignReviewPage() {
           >
             {bulkSending ? 'Sending bulk…' : `Bulk send ${queued || ''}`}
           </button>
+          {counts.failed ? (
+            <button
+              className="btn secondary"
+              type="button"
+              disabled={generating || bulkSending}
+              onClick={() => void retryFailed()}
+            >
+              Retry {counts.failed} failed
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -171,34 +201,59 @@ export function CampaignReviewPage() {
 
       <div className="mail-board">
         <aside className="mail-inbox panel">
-          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
             <strong style={{ fontFamily: 'var(--display)', fontSize: 15 }}>All emails</strong>
-            <button
-              className="btn secondary"
-              type="button"
-              style={{ padding: '0.35rem 0.75rem', fontSize: 12 }}
-              disabled={!counts.ready || bulkSending}
-              onClick={() => {
-                leads.forEach((_, i) => {
-                  if (leadState(leads[i]) === 'ready' && draftsByLead[i]) queueLead(i, true)
-                })
-              }}
-            >
-              Add all to bulk
-            </button>
+            <div className="row" style={{ gap: 6 }}>
+              {([
+                ['all', `All ${counts.total}`],
+                ['ready', `Ready ${counts.ready + counts.queued}`],
+                ['failed', `Failed ${counts.failed}`],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`btn secondary${filter === id ? '' : ''}`}
+                  style={{
+                    padding: '0.35rem 0.7rem',
+                    fontSize: 12,
+                    background: filter === id ? '#eff6ff' : 'white',
+                    borderColor: filter === id ? '#93c5fd' : undefined,
+                  }}
+                  onClick={() => setFilter(id)}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                className="btn secondary"
+                type="button"
+                style={{ padding: '0.35rem 0.75rem', fontSize: 12 }}
+                disabled={!counts.ready || bulkSending}
+                onClick={() => {
+                  leads.forEach((_, i) => {
+                    if (leadState(leads[i]) === 'ready' && draftsByLead[i]) queueLead(i, true)
+                  })
+                }}
+              >
+                Add all to bulk
+              </button>
+            </div>
           </div>
           <div className="mail-inbox-list">
             {leads.map((l, i) => {
               const st = leadState(l)
+              if (filter === 'ready' && st !== 'ready' && st !== 'queued') return null
+              if (filter === 'failed' && st !== 'failed') return null
               const d = draftsByLead[i]
-              const subject = d?.subject || l._subject || (st === 'processing' ? 'Writing…' : 'Waiting…')
+              const subject = cardSubject(l, d?.subject || l._subject, st)
               const to = d?.to || l._to
+              const err = st === 'failed' ? cleanStatus(l._error || l._status) : ''
               return (
                 <div
                   key={i}
                   role="button"
                   tabIndex={0}
-                  className={`mail-card${i === currentIndex ? ' active' : ''}${st === 'queued' ? ' queued' : ''}${st === 'sent' ? ' sent' : ''}${st === 'skipped' ? ' discarded' : ''}`}
+                  className={`mail-card${i === currentIndex ? ' active' : ''}${st === 'queued' ? ' queued' : ''}${st === 'sent' ? ' sent' : ''}${st === 'skipped' ? ' discarded' : ''}${st === 'failed' ? ' failed' : ''}`}
                   onClick={() => selectLead(i)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -227,8 +282,14 @@ export function CampaignReviewPage() {
                     </span>
                     <span className="mail-card-subject">{subject}</span>
                     <span className="muted mail-card-meta">
-                      {to ? `To ${to}` : l.website || 'No recipient yet'}
-                      {snippet(d?.html || l._preview_html) ? ` · ${snippet(d?.html || l._preview_html)}` : ''}
+                      {st === 'failed'
+                        ? err
+                        : to
+                          ? `To ${to}`
+                          : l.website || 'No recipient yet'}
+                      {st !== 'failed' && snippet(d?.html || l._preview_html)
+                        ? ` · ${snippet(d?.html || l._preview_html)}`
+                        : ''}
                     </span>
                   </span>
                 </div>
@@ -261,26 +322,58 @@ export function CampaignReviewPage() {
               <div className="mail-reader-preview">
                 <EmailPreviewFrame html={previewHtml} subject={previewSubject} fromLabel={fromLabel} fullscreen />
               </div>
+            ) : focusState === 'failed' ? (
+              <div className="mail-fail-panel">
+                <strong>This email failed to generate</strong>
+                <p className="muted" style={{ margin: '0.45rem 0 0', maxWidth: '52ch' }}>
+                  {cleanStatus(focus?._error || focus?._status) ||
+                    'The website could not be scraped or the draft could not be written.'}
+                </p>
+                {focus?.website ? (
+                  <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: 13 }}>
+                    {String(focus.website)}
+                  </p>
+                ) : null}
+                <div className="row" style={{ marginTop: 16, gap: 8 }}>
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={acting}
+                    onClick={() => void retryLead(currentIndex)}
+                  >
+                    Retry this email
+                  </button>
+                  <button
+                    className="btn secondary"
+                    type="button"
+                    disabled={acting}
+                    onClick={() => void discardLead(currentIndex)}
+                  >
+                    Discard
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="skeleton-frame tall live-preview-empty">
-                <div className="live-pulse-ring" />
+                {focusState === 'processing' ? <div className="live-pulse-ring" /> : null}
                 <strong>
-                  {focusState === 'processing' || generating
+                  {focusState === 'processing'
                     ? `Writing email ${currentIndex + 1} of ${counts.total}…`
-                    : focusState === 'failed'
-                      ? 'This email failed to generate'
-                      : focusState === 'skipped'
-                        ? 'This email was discarded'
-                        : focusState === 'sent'
-                          ? 'This email was sent'
-                          : 'Preview appears here when the draft is ready'}
+                    : focusState === 'skipped'
+                      ? 'This email was discarded'
+                      : focusState === 'sent'
+                        ? 'This email was sent'
+                        : 'Preview appears here when the draft is ready'}
                 </strong>
                 <p className="muted" style={{ margin: '0.4rem 0 0', maxWidth: '42ch' }}>
-                  Every lead is generated together. Open any card on the left as soon as it is ready.
+                  {focusState === 'processing'
+                    ? 'This lead is being scraped and written. Other emails can still be reviewed.'
+                    : 'Open any ready card on the left to preview, send, or add it to bulk.'}
                 </p>
               </div>
             )}
 
+            {focusState === 'failed' ? null : (
             <div className="mail-actions">
               <button
                 className="btn danger"
@@ -307,6 +400,7 @@ export function CampaignReviewPage() {
                 {sendingThis ? 'Sending…' : 'Send now'}
               </button>
             </div>
+            )}
           </div>
 
           <aside className="review-chat panel">

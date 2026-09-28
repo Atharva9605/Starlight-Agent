@@ -2534,6 +2534,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .mail-card.queued { border-color: #fdba74; background: #fffbeb; }
 .mail-card.sent { opacity: 0.72; }
 .mail-card.discarded { opacity: 0.55; }
+.mail-card.failed { border-color: #fecdd3; background: #fff1f2; }
+.mail-fail-panel {
+  min-height: 42vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 1.5rem 1.25rem;
+  border: 1px dashed #fecdd3;
+  border-radius: 14px;
+  background: #fff7f8;
+}
+.mail-fail-panel strong {
+  font-family: var(--display);
+  font-size: 1.15rem;
+}
 .mail-card-body {
   display: flex;
   flex-direction: column;

@@ -75,8 +75,22 @@ function leadState(lead: Lead): 'sent' | 'failed' | 'processing' | 'pending' | '
   if (s.includes('fail') || s.includes('error') || s.includes('❌')) return 'failed'
   if (lead._queued || s.includes('bulk')) return 'queued'
   if (s.includes('ready') || s.includes('📝')) return 'ready'
-  if (s.includes('process') || s.includes('⚙') || s.includes('generat')) return 'processing'
+  if (
+    s.includes('process') ||
+    s.includes('⚙') ||
+    s.includes('generat') ||
+    s.includes('retry') ||
+    s.includes('finding')
+  ) {
+    return 'processing'
+  }
   return 'pending'
+}
+
+function isTransientGenerateError(message: string): boolean {
+  return /429|502|503|504|timeout|timed out|failed to fetch|network|econnreset|overload|rate limit/i.test(
+    message,
+  )
 }
 
 type CampaignValue = {
@@ -133,6 +147,8 @@ type CampaignValue = {
   discardLead: (index: number) => Promise<void>
   queueLead: (index: number, queued?: boolean) => void
   sendBulk: () => Promise<void>
+  retryLead: (index: number) => Promise<void>
+  retryFailed: () => Promise<void>
   reviseCurrent: (message: string) => Promise<void>
 }
 
@@ -334,14 +350,30 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const res = await api.campaignGenerate({
-        lead,
-        template: opts.template,
-        recipient_override: opts.recipientOverride,
-        sender_email: opts.senderEmail,
-        row_index: index,
-        attach_product_sheet: opts.attachProductSheet,
-      })
+      const res = await (async () => {
+        let lastErr = ''
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            return await api.campaignGenerate({
+              lead,
+              template: opts.template,
+              recipient_override: opts.recipientOverride,
+              sender_email: opts.senderEmail,
+              row_index: index,
+              attach_product_sheet: opts.attachProductSheet,
+            })
+          } catch (e: any) {
+            lastErr = e.message || 'Failed'
+            if (attempt === 0 && isTransientGenerateError(lastErr) && !stopReviewRef.current) {
+              setLeadStatus(index, '🔁 Retrying…')
+              await new Promise((r) => setTimeout(r, 2000))
+              continue
+            }
+            throw e
+          }
+        }
+        throw new Error(lastErr || 'Failed')
+      })()
       const usedDiscover = needsDiscover || Boolean(res.discovered)
       const d: Draft = {
         draftId: res.draft_id,
@@ -383,6 +415,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
                 _to: res.to,
                 _queued: false,
                 _status: '📝 Ready for review',
+                _error: '',
               }
             : l,
         )
@@ -423,9 +456,22 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       ])
       return d
     } catch (e: any) {
-      pushStage(index, { stage: 'error', label: e.message || 'Failed', state: 'error' })
-      setLeadStatus(index, `❌ ${e.message || 'Failed'}`)
-      setLogs((prev) => [...prev, e.message || String(e)])
+      const err = e.message || 'Failed'
+      pushStage(index, { stage: 'error', label: err, state: 'error' })
+      setLeads((prev) => {
+        const next = prev.map((l, i) =>
+          i === index ? { ...l, _status: `❌ ${err}`, _error: err } : l,
+        )
+        leadsRef.current = next
+        return next
+      })
+      applyLeadChat(index, [
+        {
+          role: 'system',
+          content: `Could not generate this email: ${err}`,
+        },
+      ])
+      setLogs((prev) => [...prev, `Lead ${index + 1} failed: ${err}`])
       return null
     } finally {
       inflightRef.current = Math.max(0, inflightRef.current - 1)
@@ -478,6 +524,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           _queued: false,
           _draft_id: '',
           _to: '',
+          _error: '',
         }
       })
       leadsRef.current = next
@@ -739,6 +786,35 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, [sendLead])
 
+  const retryLead = useCallback(async (index: number) => {
+    stopReviewRef.current = false
+    setStatus('reviewing')
+    await generateAt(index)
+    reviewSettled()
+  }, [generateAt])
+
+  const retryFailed = useCallback(async () => {
+    stopReviewRef.current = false
+    setStatus('reviewing')
+    const ids = leadsRef.current
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => leadState(l) === 'failed')
+      .map(({ i }) => i)
+    if (!ids.length) return
+    let cursor = 0
+    const worker = async () => {
+      while (cursor < ids.length) {
+        if (stopReviewRef.current) return
+        const i = ids[cursor]
+        cursor += 1
+        await generateAt(i)
+      }
+    }
+    const n = Math.min(GEN_CONCURRENCY, ids.length)
+    await Promise.all(Array.from({ length: n }, () => worker()))
+    reviewSettled()
+  }, [generateAt])
+
   const reviseCurrent = useCallback(async (message: string) => {
     const index = currentIndexRef.current
     const d = draftsRef.current[index]
@@ -861,6 +937,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     discardLead,
     queueLead,
     sendBulk,
+    retryLead,
+    retryFailed,
     reviseCurrent,
   }
 
