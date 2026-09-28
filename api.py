@@ -1045,6 +1045,8 @@ class CampaignGenerateRequest(BaseModel):
     sender_email: Optional[str] = ""
     row_index: int = 0
     attach_product_sheet: bool = True
+    force_discover: bool = False
+    exclude_websites: Optional[list[str]] = None
 
 
 class CampaignReviseRequest(BaseModel):
@@ -1056,8 +1058,16 @@ async def campaign_generate(req: CampaignGenerateRequest):
     """Scrape + generate one outbound draft. Does not send."""
     lead = dict(req.lead or {})
     had_website = bool(clean_lead_value(lead.get("website")))
+    exclude = list(req.exclude_websites or [])
+    if req.force_discover and had_website:
+        exclude.append(str(lead.get("website") or ""))
     try:
-        website = await run_in_thread(ensure_lead_website, lead)
+        website = await run_in_thread(
+            ensure_lead_website,
+            lead,
+            force_discover=req.force_discover,
+            exclude_websites=exclude,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -1074,6 +1084,8 @@ async def campaign_generate(req: CampaignGenerateRequest):
                 "or the URL may be wrong."
             ),
         )
+
+    _apply_recipient(scraped_data, recipient_override=req.recipient_override, lead=lead)
     company_hint = clean_lead_value(lead.get("company")) or lead_search_name(lead)
     if company_hint:
         scraped_data.setdefault("company", company_hint)
@@ -1116,7 +1128,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "scraped_data": scraped_data,
         "row_index": req.row_index,
         "chat": [],
-        "discovered": not had_website,
+        "discovered": req.force_discover or not had_website,
     }
     draft_id = store_draft(draft)
     return {
@@ -1128,7 +1140,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "website": website,
         "company": company,
         "row_index": req.row_index,
-        "discovered": not had_website,
+        "discovered": req.force_discover or not had_website,
         "product_count": len((trace_info or {}).get("product_refs") or []),
         "product_sheet": (trace_info or {}).get("product_sheet_name") or "",
         "attached_product_sheet": bool((trace_info or {}).get("attached_product_sheet")),

@@ -307,6 +307,8 @@ export const api = {
     sender_email?: string
     row_index?: number
     attach_product_sheet?: boolean
+    force_discover?: boolean
+    exclude_websites?: string[]
   }) =>
     request<{
       draft_id: string

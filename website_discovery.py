@@ -117,6 +117,25 @@ def _host(url: str) -> str:
         return ""
 
 
+def _hosts_from(values: list[str] | None) -> set[str]:
+    out: set[str] = set()
+    for val in values or []:
+        text = clean_lead_value(val)
+        if not text:
+            continue
+        url = text if re.match(r"^https?://", text, re.I) else "https://" + text.lstrip("/")
+        host = _host(url)
+        if host:
+            out.add(host)
+    return out
+
+
+def _host_excluded(host: str, exclude_hosts: set[str]) -> bool:
+    if not host or host in exclude_hosts:
+        return True
+    return any(host == b or host.endswith("." + b) for b in exclude_hosts)
+
+
 def _is_skipped_host(host: str) -> bool:
     if not host:
         return True
@@ -166,7 +185,10 @@ def _score_result(url: str, title: str, snippet: str, query: str) -> float:
     return hits - depth_penalty
 
 
-def _pick_best_url(results: list[dict], query: str) -> str | None:
+def _pick_best_url(
+    results: list[dict], query: str, exclude_hosts: set[str] | None = None
+) -> str | None:
+    banned = exclude_hosts or set()
     ranked: list[tuple[float, str]] = []
     for item in results:
         if not isinstance(item, dict):
@@ -179,6 +201,9 @@ def _pick_best_url(results: list[dict], query: str) -> str | None:
         url = _normalize_url(raw)
         if not url:
             continue
+        host = _host(url)
+        if _host_excluded(host, banned):
+            continue
         score = _score_result(
             url,
             clean_lead_value(item.get("title")),
@@ -189,25 +214,22 @@ def _pick_best_url(results: list[dict], query: str) -> str | None:
             continue
         ranked.append((score, url))
     if not ranked:
-        # Fallback: first non-skipped organic URL even if name match is weak
         for item in results:
             if not isinstance(item, dict):
                 continue
             raw = clean_lead_value(item.get("url") or item.get("link"))
             url = _normalize_url(raw)
-            if url and not _is_skipped_host(_host(url)):
+            if url and not _is_skipped_host(_host(url)) and not _host_excluded(_host(url), banned):
                 return url
         return None
     ranked.sort(key=lambda x: x[0], reverse=True)
     best_score, best_url = ranked[0]
-    # Require at least a weak token hit when we have tokens
     if _name_tokens(query) and best_score < 1.0:
-        # still accept top organic fallback
         return best_url
     return best_url
 
 
-def discover_website(company_name: str) -> str | None:
+def discover_website(company_name: str, exclude_hosts: set[str] | None = None) -> str | None:
     """
     Query OpenSERP for the official website of ``company_name``.
     Returns a normalized homepage URL, or None if nothing usable is found.
@@ -216,7 +238,6 @@ def discover_website(company_name: str) -> str | None:
     if not query:
         return None
 
-    # Bias toward official sites without paid operators
     text = f"{query} official website"
     params = {
         "text": text,
@@ -239,7 +260,7 @@ def discover_website(company_name: str) -> str | None:
         log.warning("OpenSERP returned no results list for %r", query)
         return None
 
-    chosen = _pick_best_url(results, query)
+    chosen = _pick_best_url(results, query, exclude_hosts=exclude_hosts)
     if chosen:
         log.info("OpenSERP resolved %r → %s", query, chosen)
     else:
@@ -247,13 +268,39 @@ def discover_website(company_name: str) -> str | None:
     return chosen
 
 
-def ensure_lead_website(lead: dict) -> str:
+def ensure_lead_website(
+    lead: dict,
+    *,
+    force_discover: bool = False,
+    exclude_websites: list[str] | None = None,
+) -> str:
     """
-    Ensure ``lead['website']`` is set. Uses OpenSERP when the row only has a name.
-
-    Mutates ``lead`` in place. Raises ``ValueError`` when discovery is impossible.
+    Ensure ``lead['website']`` is set. Uses OpenSERP when the row only has a name,
+    or when ``force_discover`` is set (failed-site retry).
     """
     website = clean_lead_value(lead.get("website"))
+    exclude = _hosts_from(exclude_websites)
+
+    if force_discover:
+        if website:
+            exclude |= _hosts_from([website])
+        name = lead_search_name(lead)
+        if not name and website:
+            host = _host(website if "://" in website else "https://" + website)
+            name = host.split(".")[0].replace("-", " ") if host else ""
+        if not name:
+            raise ValueError("Need a company name to retry via OpenSERP")
+        found = discover_website(name, exclude_hosts=exclude)
+        if not found:
+            raise ValueError(
+                f"OpenSERP found no other website for '{name}'"
+                + (f" besides {website}" if website else "")
+            )
+        lead["website"] = found
+        if not clean_lead_value(lead.get("company")):
+            lead["company"] = name
+        return found
+
     if website:
         if not re.match(r"^https?://", website, re.I):
             website = "https://" + website.lstrip("/")
@@ -264,7 +311,7 @@ def ensure_lead_website(lead: dict) -> str:
     if not name:
         raise ValueError("Lead must include a website or a company/name")
 
-    found = discover_website(name)
+    found = discover_website(name, exclude_hosts=exclude)
     if not found:
         raise ValueError(f"Could not find a website for '{name}' via OpenSERP")
 

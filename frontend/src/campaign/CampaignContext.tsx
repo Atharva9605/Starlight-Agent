@@ -326,20 +326,37 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const generateAt = useCallback(async (index: number): Promise<Draft | null> => {
-    const lead = leadsRef.current[index]
+  const generateAt = useCallback(async (
+    index: number,
+    genOpts?: { forceDiscover?: boolean },
+  ): Promise<Draft | null> => {
+    const lead = { ...(leadsRef.current[index] || {}) }
     if (!leadHasIdentity(lead)) return null
+    const forceDiscover = Boolean(genOpts?.forceDiscover)
     const opts = optsRef.current
     const companyLabel = String(lead?.company || lead?.name || '').trim()
-    const needsDiscover = !String(lead?.website || '').trim()
+    const failedSite = String(lead._failed_website || lead.website || '').trim()
+    const exclude = Array.from(
+      new Set(
+        [...(Array.isArray(lead._exclude_websites) ? lead._exclude_websites : []), failedSite].filter(
+          Boolean,
+        ),
+      ),
+    )
+    const needsDiscover = forceDiscover || !String(lead?.website || '').trim()
 
     inflightRef.current += 1
     setGenerating(true)
     setStagesByLead((prev) => ({ ...prev, [index]: [] }))
-    setLeadStatus(index, needsDiscover ? '🔎 Finding website…' : '⚙️ Generating…')
+    setLeadStatus(
+      index,
+      forceDiscover || needsDiscover
+        ? `🔎 OpenSERP · ${companyLabel || 'company'}`
+        : '⚙️ Generating…',
+    )
 
     pushStage(index, { stage: 'queued', label: 'Queued', state: 'done' })
-    if (needsDiscover) {
+    if (forceDiscover || needsDiscover) {
       pushStage(index, {
         stage: 'discover',
         label: `OpenSERP · ${companyLabel || 'company'}`,
@@ -361,6 +378,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
               sender_email: opts.senderEmail,
               row_index: index,
               attach_product_sheet: opts.attachProductSheet,
+              force_discover: forceDiscover,
+              exclude_websites: forceDiscover ? exclude : undefined,
             })
           } catch (e: any) {
             lastErr = e.message || 'Failed'
@@ -460,7 +479,22 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       pushStage(index, { stage: 'error', label: err, state: 'error' })
       setLeads((prev) => {
         const next = prev.map((l, i) =>
-          i === index ? { ...l, _status: `❌ ${err}`, _error: err } : l,
+          i === index
+            ? {
+                ...l,
+                _status: `❌ ${err}`,
+                _error: err,
+                _failed_website: l._failed_website || l.website || '',
+                _exclude_websites: Array.from(
+                  new Set(
+                    [
+                      ...(Array.isArray(l._exclude_websites) ? l._exclude_websites : []),
+                      l.website,
+                    ].filter(Boolean),
+                  ),
+                ),
+              }
+            : l,
         )
         leadsRef.current = next
         return next
@@ -525,6 +559,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           _draft_id: '',
           _to: '',
           _error: '',
+          _failed_website: '',
+          _exclude_websites: [],
         }
       })
       leadsRef.current = next
@@ -789,7 +825,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const retryLead = useCallback(async (index: number) => {
     stopReviewRef.current = false
     setStatus('reviewing')
-    await generateAt(index)
+    await generateAt(index, { forceDiscover: true })
     reviewSettled()
   }, [generateAt])
 
@@ -807,7 +843,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         if (stopReviewRef.current) return
         const i = ids[cursor]
         cursor += 1
-        await generateAt(i)
+        await generateAt(i, { forceDiscover: true })
       }
     }
     const n = Math.min(GEN_CONCURRENCY, ids.length)

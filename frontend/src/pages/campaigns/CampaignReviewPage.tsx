@@ -50,8 +50,6 @@ function cardSubject(lead: Lead, subject: string | undefined, st: ReturnType<typ
   return 'Waiting…'
 }
 
-type InboxFilter = 'all' | 'ready' | 'failed'
-
 /** Review every generated email — send now, queue for bulk, or discard. */
 export function CampaignReviewPage() {
   const nav = useNavigate()
@@ -82,7 +80,6 @@ export function CampaignReviewPage() {
   } = useCampaign()
 
   const [input, setInput] = useState('')
-  const [filter, setFilter] = useState<InboxFilter>('all')
   const chatEnd = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -184,10 +181,10 @@ export function CampaignReviewPage() {
             <button
               className="btn secondary"
               type="button"
-              disabled={generating || bulkSending}
+              disabled={bulkSending}
               onClick={() => void retryFailed()}
             >
-              Retry {counts.failed} failed
+              Retry {counts.failed} via OpenSERP
             </button>
           ) : null}
         </div>
@@ -200,60 +197,39 @@ export function CampaignReviewPage() {
       ) : null}
 
       <div className="mail-board">
+        <div className="mail-lists">
         <aside className="mail-inbox panel">
           <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
-            <strong style={{ fontFamily: 'var(--display)', fontSize: 15 }}>All emails</strong>
-            <div className="row" style={{ gap: 6 }}>
-              {([
-                ['all', `All ${counts.total}`],
-                ['ready', `Ready ${counts.ready + counts.queued}`],
-                ['failed', `Failed ${counts.failed}`],
-              ] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={`btn secondary${filter === id ? '' : ''}`}
-                  style={{
-                    padding: '0.35rem 0.7rem',
-                    fontSize: 12,
-                    background: filter === id ? '#eff6ff' : 'white',
-                    borderColor: filter === id ? '#93c5fd' : undefined,
-                  }}
-                  onClick={() => setFilter(id)}
-                >
-                  {label}
-                </button>
-              ))}
-              <button
-                className="btn secondary"
-                type="button"
-                style={{ padding: '0.35rem 0.75rem', fontSize: 12 }}
-                disabled={!counts.ready || bulkSending}
-                onClick={() => {
-                  leads.forEach((_, i) => {
-                    if (leadState(leads[i]) === 'ready' && draftsByLead[i]) queueLead(i, true)
-                  })
-                }}
-              >
-                Add all to bulk
-              </button>
-            </div>
+            <strong style={{ fontFamily: 'var(--display)', fontSize: 15 }}>
+              Ready to review
+            </strong>
+            <button
+              className="btn secondary"
+              type="button"
+              style={{ padding: '0.35rem 0.75rem', fontSize: 12 }}
+              disabled={!counts.ready || bulkSending}
+              onClick={() => {
+                leads.forEach((_, i) => {
+                  if (leadState(leads[i]) === 'ready' && draftsByLead[i]) queueLead(i, true)
+                })
+              }}
+            >
+              Add all to bulk
+            </button>
           </div>
           <div className="mail-inbox-list">
             {leads.map((l, i) => {
               const st = leadState(l)
-              if (filter === 'ready' && st !== 'ready' && st !== 'queued') return null
-              if (filter === 'failed' && st !== 'failed') return null
+              if (st === 'failed' || (st === 'processing' && l._failed_website)) return null
               const d = draftsByLead[i]
               const subject = cardSubject(l, d?.subject || l._subject, st)
               const to = d?.to || l._to
-              const err = st === 'failed' ? cleanStatus(l._error || l._status) : ''
               return (
                 <div
                   key={i}
                   role="button"
                   tabIndex={0}
-                  className={`mail-card${i === currentIndex ? ' active' : ''}${st === 'queued' ? ' queued' : ''}${st === 'sent' ? ' sent' : ''}${st === 'skipped' ? ' discarded' : ''}${st === 'failed' ? ' failed' : ''}`}
+                  className={`mail-card${i === currentIndex ? ' active' : ''}${st === 'queued' ? ' queued' : ''}${st === 'sent' ? ' sent' : ''}${st === 'skipped' ? ' discarded' : ''}`}
                   onClick={() => selectLead(i)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -282,12 +258,8 @@ export function CampaignReviewPage() {
                     </span>
                     <span className="mail-card-subject">{subject}</span>
                     <span className="muted mail-card-meta">
-                      {st === 'failed'
-                        ? err
-                        : to
-                          ? `To ${to}`
-                          : l.website || 'No recipient yet'}
-                      {st !== 'failed' && snippet(d?.html || l._preview_html)
+                      {to ? `To ${to}` : l.website || 'No recipient yet'}
+                      {snippet(d?.html || l._preview_html)
                         ? ` · ${snippet(d?.html || l._preview_html)}`
                         : ''}
                     </span>
@@ -297,6 +269,84 @@ export function CampaignReviewPage() {
             })}
           </div>
         </aside>
+
+        <aside className="mail-failed panel">
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+            <strong style={{ fontFamily: 'var(--display)', fontSize: 15 }}>
+              Failed · {counts.failed}
+            </strong>
+            <button
+              className="btn secondary"
+              type="button"
+              style={{ padding: '0.35rem 0.75rem', fontSize: 12 }}
+              disabled={!counts.failed || bulkSending}
+              onClick={() => void retryFailed()}
+            >
+              Retry all via OpenSERP
+            </button>
+          </div>
+          <p className="muted" style={{ margin: '0 0 8px', fontSize: 12 }}>
+            Every failed lead stays here. Retry looks up a working site with OpenSERP, then writes the email.
+          </p>
+          <div className="mail-inbox-list">
+            {counts.failed === 0 ? (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>No failures yet.</p>
+            ) : (
+              leads.map((l, i) => {
+                const st = leadState(l)
+                const retrying = st === 'processing' && Boolean(l._failed_website)
+                if (st !== 'failed' && !retrying) return null
+                const err = cleanStatus(l._error || l._status)
+                return (
+                  <div
+                    key={`fail-${i}`}
+                    role="button"
+                    tabIndex={0}
+                    className={`mail-card failed${i === currentIndex ? ' active' : ''}${retrying ? ' queued' : ''}`}
+                    onClick={() => selectLead(i)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        selectLead(i)
+                      }
+                    }}
+                  >
+                    <span className={`queue-index ${st}`}>{i + 1}</span>
+                    <span className="mail-card-body">
+                      <span className="mail-card-top">
+                        <strong>{leadTitle(l, `Lead ${i + 1}`)}</strong>
+                        <span className={`pill ${retrying ? 'discover' : 'pink'}`}>
+                          {retrying ? 'OpenSERP' : 'Failed'}
+                        </span>
+                      </span>
+                      <span className="mail-card-subject">
+                        {retrying ? l._status || 'Looking up website…' : err || 'Could not generate'}
+                      </span>
+                      <span className="muted mail-card-meta">
+                        {l._failed_website || l.website || 'No website'}
+                        {l.company || l.name ? ` · ${l.company || l.name}` : ''}
+                      </span>
+                    </span>
+                    <button
+                      className="btn secondary"
+                      type="button"
+                      style={{ padding: '0.3rem 0.6rem', fontSize: 12, whiteSpace: 'nowrap' }}
+                      disabled={acting || retrying}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        selectLead(i)
+                        void retryLead(i)
+                      }}
+                    >
+                      OpenSERP
+                    </button>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </aside>
+        </div>
 
         <section className="mail-reader">
           <div className="mail-reader-main panel stack">
@@ -329,9 +379,12 @@ export function CampaignReviewPage() {
                   {cleanStatus(focus?._error || focus?._status) ||
                     'The website could not be scraped or the draft could not be written.'}
                 </p>
-                {focus?.website ? (
+                {focus?._failed_website || focus?.website ? (
                   <p className="muted" style={{ margin: '0.35rem 0 0', fontSize: 13 }}>
-                    {String(focus.website)}
+                    Sheet URL: {String(focus._failed_website || focus.website)}
+                    {focus._failed_website && focus.website && focus.website !== focus._failed_website
+                      ? ` · tried ${focus.website}`
+                      : ''}
                   </p>
                 ) : null}
                 <div className="row" style={{ marginTop: 16, gap: 8 }}>
@@ -341,7 +394,7 @@ export function CampaignReviewPage() {
                     disabled={acting}
                     onClick={() => void retryLead(currentIndex)}
                   >
-                    Retry this email
+                    Retry via OpenSERP
                   </button>
                   <button
                     className="btn secondary"
