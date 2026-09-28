@@ -74,12 +74,21 @@ export function CampaignReviewPage() {
     retryLead,
     retryFailed,
     reviseCurrent,
+    applyBulkEdit,
+    removeBulkEdit,
+    clearBulkEdits,
+    bulkEdits,
+    bulkRevising,
+    bulkReviseProgress,
     selectLead,
     stop,
+    pause,
+    resume,
     reset,
   } = useCampaign()
 
   const [input, setInput] = useState('')
+  const [bulkInput, setBulkInput] = useState('')
   const chatEnd = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -102,8 +111,9 @@ export function CampaignReviewPage() {
   }
 
   const done = status === 'done' || status === 'stopped'
+  const paused = status === 'paused'
   const sendingThis = sendingIndex === currentIndex
-  const acting = revising || sendingThis || bulkSending
+  const acting = revising || sendingThis || bulkSending || bulkRevising
   const focus = leads[currentIndex]
   const focusState = focus ? leadState(focus) : 'pending'
   const focusDraft = draftsByLead[currentIndex] || (draft?.rowIndex === currentIndex ? draft : null)
@@ -126,19 +136,23 @@ export function CampaignReviewPage() {
     ? `Writing ${generated} of ${counts.total} emails`
     : bulkSending
       ? `Sending bulk queue…`
-      : done
-        ? status === 'stopped'
-          ? 'Stopped'
-          : 'Campaign complete'
-        : `Review ${counts.total} email${counts.total === 1 ? '' : 's'}`
+      : bulkRevising
+        ? `Bulk AI edit ${bulkReviseProgress.done}/${bulkReviseProgress.total}`
+        : paused
+          ? 'Campaign paused'
+          : done
+            ? status === 'stopped'
+              ? 'Stopped'
+              : 'Campaign complete'
+            : `Review ${counts.total} email${counts.total === 1 ? '' : 's'}`
 
   return (
     <div className="mail-board-screen">
       <header className="review-top">
         <div>
           <div className="dash-kicker">
-            {generating || bulkSending ? <span className="live-dot" /> : null}
-            Review all emails
+            {generating || bulkSending || bulkRevising ? <span className="live-dot" /> : null}
+            {paused ? 'Paused' : 'Review all emails'}
           </div>
           <h1>{headline}</h1>
           <p className="muted" style={{ margin: '0.2rem 0 0' }}>
@@ -148,11 +162,21 @@ export function CampaignReviewPage() {
           </p>
         </div>
         <div className="row" style={{ flexWrap: 'wrap' }}>
-          {!done ? (
+          {paused ? (
+            <button className="btn" type="button" onClick={() => void resume()} disabled={sendingThis}>
+              Resume
+            </button>
+          ) : !done ? (
+            <button className="btn secondary" type="button" onClick={pause} disabled={sendingThis}>
+              Pause
+            </button>
+          ) : null}
+          {!done && !paused ? (
             <button className="btn secondary" type="button" onClick={stop} disabled={sendingThis}>
               Stop
             </button>
-          ) : (
+          ) : null}
+          {done ? (
             <>
               <button
                 className="btn secondary"
@@ -168,7 +192,11 @@ export function CampaignReviewPage() {
                 Inbox
               </Link>
             </>
-          )}
+          ) : paused ? (
+            <button className="btn secondary" type="button" onClick={stop}>
+              Stop
+            </button>
+          ) : null}
           <button
             className="btn amber"
             type="button"
@@ -190,11 +218,61 @@ export function CampaignReviewPage() {
         </div>
       </header>
 
-      {generating ? (
+      {generating || bulkRevising ? (
         <div className="progress thick" style={{ margin: 0 }}>
-          <div className="progress-fill animated" style={{ width: `${counts.progressPct}%` }} />
+          <div
+            className="progress-fill animated"
+            style={{
+              width: `${bulkRevising && bulkReviseProgress.total ? Math.round((bulkReviseProgress.done / bulkReviseProgress.total) * 100) : counts.progressPct}%`,
+            }}
+          />
         </div>
       ) : null}
+
+      <form
+        className="bulk-edit-bar panel"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!bulkInput.trim() || bulkRevising) return
+          const msg = bulkInput.trim()
+          setBulkInput('')
+          void applyBulkEdit(msg)
+        }}
+      >
+        <div>
+          <strong style={{ fontFamily: 'var(--display)', fontSize: 15 }}>Bulk AI edit</strong>
+          <p className="muted" style={{ margin: '0.2rem 0 0', fontSize: 13 }}>
+            Applies to every email already written, and to every email generated after this.
+          </p>
+        </div>
+        {bulkEdits.length ? (
+          <div className="bulk-edit-chips">
+            {bulkEdits.map((msg, i) => (
+              <span key={`${i}-${msg.slice(0, 24)}`} className="pill warn">
+                {msg}
+                <button type="button" className="chip-x" onClick={() => removeBulkEdit(i)} aria-label="Remove">
+                  ×
+                </button>
+              </span>
+            ))}
+            <button type="button" className="btn secondary" style={{ padding: '0.25rem 0.7rem', fontSize: 12 }} onClick={clearBulkEdits}>
+              Clear upcoming
+            </button>
+          </div>
+        ) : null}
+        <div className="chat-compose">
+          <input
+            className="input"
+            placeholder="e.g. Make the tone warmer and shorten the opening…"
+            value={bulkInput}
+            disabled={bulkRevising || done}
+            onChange={(e) => setBulkInput(e.target.value)}
+          />
+          <button className="btn" type="submit" disabled={bulkRevising || done || !bulkInput.trim()}>
+            {bulkRevising ? `Updating ${bulkReviseProgress.done}/${bulkReviseProgress.total}` : 'Apply to all'}
+          </button>
+        </div>
+      </form>
 
       <div className="mail-board">
         <div className="mail-lists">

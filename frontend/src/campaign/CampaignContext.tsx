@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { api, getApiBase } from '../api/client'
 
 export type Lead = Record<string, any>
-export type RunStatus = 'idle' | 'running' | 'reviewing' | 'done' | 'stopped' | 'failed'
+export type RunStatus = 'idle' | 'running' | 'reviewing' | 'paused' | 'done' | 'stopped' | 'failed'
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string }
 
@@ -73,14 +73,17 @@ function leadState(lead: Lead): 'sent' | 'failed' | 'processing' | 'pending' | '
   if (s.includes('sent') || s.includes('✅')) return 'sent'
   if (s.includes('skip') || s.includes('discard')) return 'skipped'
   if (s.includes('fail') || s.includes('error') || s.includes('❌')) return 'failed'
-  if (lead._queued || s.includes('bulk')) return 'queued'
+  if (lead._queued || s.includes('bulk send')) return 'queued'
   if (s.includes('ready') || s.includes('📝')) return 'ready'
+  if (s.includes('waiting') || s.includes('⏳')) return 'pending'
   if (
     s.includes('process') ||
     s.includes('⚙') ||
     s.includes('generat') ||
     s.includes('retry') ||
-    s.includes('finding')
+    s.includes('finding') ||
+    s.includes('applying') ||
+    s.includes('✨')
   ) {
     return 'processing'
   }
@@ -139,6 +142,8 @@ type CampaignValue = {
   clearLeads: () => void
   start: () => Promise<'live' | 'review'>
   stop: () => void
+  pause: () => void
+  resume: () => Promise<void>
   reset: () => void
   selectLead: (index: number) => void
   sendCurrent: () => Promise<void>
@@ -150,6 +155,12 @@ type CampaignValue = {
   retryLead: (index: number) => Promise<void>
   retryFailed: () => Promise<void>
   reviseCurrent: (message: string) => Promise<void>
+  applyBulkEdit: (message: string) => Promise<void>
+  removeBulkEdit: (index: number) => void
+  clearBulkEdits: () => void
+  bulkEdits: string[]
+  bulkRevising: boolean
+  bulkReviseProgress: { done: number; total: number }
 }
 
 const Ctx = createContext<CampaignValue | null>(null)
@@ -177,9 +188,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const [stagesByLead, setStagesByLead] = useState<Record<number, StageEvent[]>>({})
   const [draftsByLead, setDraftsByLead] = useState<Record<number, Draft>>({})
   const [runSender, setRunSender] = useState('')
+  const [bulkEdits, setBulkEdits] = useState<string[]>([])
+  const [bulkRevising, setBulkRevising] = useState(false)
+  const [bulkReviseProgress, setBulkReviseProgress] = useState({ done: 0, total: 0 })
 
   const abortRef = useRef<AbortController | null>(null)
   const stopReviewRef = useRef(false)
+  const pauseRef = useRef(false)
+  const bulkEditsRef = useRef<string[]>([])
   const leadsRef = useRef<Lead[]>([])
   const currentIndexRef = useRef(0)
   const inflightRef = useRef(0)
@@ -205,6 +221,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     chatByLeadRef.current = {}
     setSendingIndex(null)
     setBulkSending(false)
+    setBulkEdits([])
+    bulkEditsRef.current = []
+    pauseRef.current = false
   }, [])
 
   const removeLead = useCallback((index: number) => {
@@ -227,6 +246,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setRunSender('')
     setSendingIndex(null)
     setBulkSending(false)
+    setBulkEdits([])
+    bulkEditsRef.current = []
+    pauseRef.current = false
   }, [])
 
   const reset = useCallback(() => {
@@ -250,12 +272,26 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     chatByLeadRef.current = {}
     setRunSender('')
     inflightRef.current = 0
+    pauseRef.current = false
+    setBulkEdits([])
+    bulkEditsRef.current = []
+    setBulkRevising(false)
+    setBulkReviseProgress({ done: 0, total: 0 })
   }, [])
 
   const stop = useCallback(() => {
     abortRef.current?.abort()
+    pauseRef.current = false
     stopReviewRef.current = true
     setStatus('stopped')
+    setGenerating(false)
+  }, [])
+
+  const pause = useCallback(() => {
+    abortRef.current?.abort()
+    pauseRef.current = true
+    stopReviewRef.current = true
+    setStatus('paused')
     setGenerating(false)
   }, [])
 
@@ -467,13 +503,50 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
             : `Draft ready for ${res.company || res.website}. Send now, add to bulk, or discard.`,
         },
       ])
+      let finalDraft = d
+      const instructions = bulkEditsRef.current.slice()
+      if (instructions.length) {
+        setLeadStatus(index, '✨ Applying bulk AI edit…')
+        for (const msg of instructions) {
+          try {
+            const rev = await api.campaignRevise(finalDraft.draftId, msg)
+            finalDraft = { ...finalDraft, subject: rev.subject, html: rev.html }
+            storeDraft(index, finalDraft)
+            if (currentIndexRef.current === index) {
+              setLivePreview((p) =>
+                p && p.rowIndex === index
+                  ? { ...p, html: rev.html, subject: rev.subject }
+                  : p,
+              )
+              setDraft(finalDraft)
+            }
+            setLeads((prev) => {
+              const next = prev.map((l, i) =>
+                i === index ? { ...l, _preview_html: rev.html, _subject: rev.subject } : l,
+              )
+              leadsRef.current = next
+              return next
+            })
+          } catch {
+            break
+          }
+        }
+        applyLeadChat(index, [
+          ...(chatByLeadRef.current[index] || []),
+          {
+            role: 'system',
+            content: `Applied ${instructions.length} bulk AI edit${instructions.length === 1 ? '' : 's'} to this new email.`,
+          },
+        ])
+      }
+      setLeadStatus(index, '📝 Ready for review')
       setLogs((prev) => [
         ...prev,
         usedDiscover
           ? `OpenSERP → ${res.website} · draft ready`
           : `Draft ready for ${res.website}`,
       ])
-      return d
+      return finalDraft
     } catch (e: any) {
       const err = e.message || 'Failed'
       pushStage(index, { stage: 'error', label: err, state: 'error' })
@@ -515,6 +588,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const reviewSettled = () => {
     if (inflightRef.current > 0) return
+    if (pauseRef.current) {
+      setStatus('paused')
+      return
+    }
     const open = leadsRef.current.some((l) => {
       const s = leadState(l)
       return s === 'ready' || s === 'queued' || s === 'processing' || s === 'pending'
@@ -526,8 +603,34 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (stopReviewRef.current) setStatus('stopped')
   }
 
+  const remainingGenerateJobs = () =>
+    leadsRef.current
+      .map((l, i) => i)
+      .filter((i) => {
+        const l = leadsRef.current[i]
+        if (!leadHasIdentity(l)) return false
+        if (draftsRef.current[i]) return false
+        const s = leadState(l)
+        return s === 'pending'
+      })
+
+  const runGenerateQueue = async (jobs: number[], genOpts?: { forceDiscover?: boolean }) => {
+    let cursor = 0
+    const worker = async () => {
+      while (cursor < jobs.length) {
+        if (stopReviewRef.current || pauseRef.current) return
+        const i = jobs[cursor]
+        cursor += 1
+        await generateAt(i, genOpts)
+      }
+    }
+    const n = Math.min(GEN_CONCURRENCY, jobs.length)
+    if (n > 0) await Promise.all(Array.from({ length: n }, () => worker()))
+  }
+
   const startReview = useCallback(async () => {
     stopReviewRef.current = false
+    pauseRef.current = false
     inflightRef.current = 0
     setStatus('reviewing')
     setLogs([])
@@ -540,6 +643,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     chatByLeadRef.current = {}
     setSendingIndex(null)
     setBulkSending(false)
+    setBulkEdits([])
+    bulkEditsRef.current = []
 
     const list = leadsRef.current
     const jobs: number[] = []
@@ -571,27 +676,21 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     currentIndexRef.current = first
     setCurrentIndex(first)
 
-    let cursor = 0
-    const worker = async () => {
-      while (cursor < jobs.length) {
-        if (stopReviewRef.current) return
-        const i = jobs[cursor]
-        cursor += 1
-        await generateAt(i)
-      }
-    }
-    const n = Math.min(GEN_CONCURRENCY, jobs.length)
-    await Promise.all(Array.from({ length: n }, () => worker()))
+    await runGenerateQueue(jobs)
     reviewSettled()
   }, [generateAt])
 
-  const startAutosend = useCallback(async () => {
+  const startAutosend = useCallback(async (resume = false) => {
     setStatus('running')
-    setLogs([])
-    setDraft(null)
-    setLivePreview(null)
-    setStagesByLead({})
-    setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
+    pauseRef.current = false
+    stopReviewRef.current = false
+    if (!resume) {
+      setLogs([])
+      setDraft(null)
+      setLivePreview(null)
+      setStagesByLead({})
+      setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
+    }
 
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -700,7 +799,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       }
       setStatus((s) => (s === 'running' ? 'done' : s))
     } catch (e: any) {
-      if (e.name === 'AbortError') return
+      if (e.name === 'AbortError') {
+        if (pauseRef.current) setStatus('paused')
+        return
+      }
       setLogs((prev) => [...prev, e.message])
       setStatus('failed')
     }
@@ -714,6 +816,19 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     void startReview()
     return 'review'
   }, [startAutosend, startReview])
+
+  const resume = useCallback(async () => {
+    pauseRef.current = false
+    stopReviewRef.current = false
+    if (optsRef.current.autosend) {
+      void startAutosend(true)
+      return
+    }
+    setStatus('reviewing')
+    const jobs = remainingGenerateJobs()
+    await runGenerateQueue(jobs)
+    reviewSettled()
+  }, [startAutosend, generateAt])
 
   const sendLead = useCallback(async (index: number) => {
     const d = draftsRef.current[index]
@@ -831,25 +946,89 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const retryFailed = useCallback(async () => {
     stopReviewRef.current = false
+    pauseRef.current = false
     setStatus('reviewing')
     const ids = leadsRef.current
       .map((l, i) => ({ l, i }))
       .filter(({ l }) => leadState(l) === 'failed')
       .map(({ i }) => i)
     if (!ids.length) return
-    let cursor = 0
-    const worker = async () => {
-      while (cursor < ids.length) {
-        if (stopReviewRef.current) return
-        const i = ids[cursor]
-        cursor += 1
-        await generateAt(i, { forceDiscover: true })
-      }
-    }
-    const n = Math.min(GEN_CONCURRENCY, ids.length)
-    await Promise.all(Array.from({ length: n }, () => worker()))
+    await runGenerateQueue(ids, { forceDiscover: true })
     reviewSettled()
   }, [generateAt])
+
+  const applyRevision = async (index: number, message: string) => {
+    const d = draftsRef.current[index]
+    if (!d || !message.trim()) return
+    const res = await api.campaignRevise(d.draftId, message.trim())
+    const updated: Draft = { ...d, subject: res.subject, html: res.html }
+    storeDraft(index, updated)
+    if (currentIndexRef.current === index) {
+      setDraft(updated)
+      setLivePreview((p) =>
+        p && p.rowIndex === index ? { ...p, html: res.html, subject: res.subject } : p,
+      )
+    }
+    setLeads((prev) => {
+      const next = prev.map((l, i) =>
+        i === index ? { ...l, _preview_html: res.html, _subject: res.subject } : l,
+      )
+      leadsRef.current = next
+      return next
+    })
+    applyLeadChat(index, [
+      ...(chatByLeadRef.current[index] || []),
+      { role: 'user', content: `[Bulk] ${message.trim()}` },
+      { role: 'assistant', content: 'Updated from bulk AI edit.' },
+    ])
+  }
+
+  const applyBulkEdit = useCallback(async (message: string) => {
+    const msg = message.trim()
+    if (!msg) return
+    bulkEditsRef.current = [...bulkEditsRef.current, msg]
+    setBulkEdits(bulkEditsRef.current.slice())
+    const targets = Object.keys(draftsRef.current)
+      .map(Number)
+      .filter((i) => {
+        const s = leadState(leadsRef.current[i] || {})
+        return s === 'ready' || s === 'queued'
+      })
+    if (!targets.length) {
+      setLogs((prev) => [...prev, `Bulk AI edit saved for upcoming emails: ${msg}`])
+      return
+    }
+    setBulkRevising(true)
+    setBulkReviseProgress({ done: 0, total: targets.length })
+    let cursor = 0
+    let done = 0
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const i = targets[cursor]
+        cursor += 1
+        try {
+          await applyRevision(i, msg)
+        } catch {
+          /* keep going */
+        }
+        done += 1
+        setBulkReviseProgress({ done, total: targets.length })
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(GEN_CONCURRENCY, targets.length) }, () => worker()))
+    setBulkRevising(false)
+    setLogs((prev) => [...prev, `Bulk AI edit applied to ${targets.length} emails and all upcoming drafts.`])
+  }, [])
+
+  const removeBulkEdit = useCallback((index: number) => {
+    bulkEditsRef.current = bulkEditsRef.current.filter((_, i) => i !== index)
+    setBulkEdits(bulkEditsRef.current.slice())
+  }, [])
+
+  const clearBulkEdits = useCallback(() => {
+    bulkEditsRef.current = []
+    setBulkEdits([])
+  }, [])
 
   const reviseCurrent = useCallback(async (message: string) => {
     const index = currentIndexRef.current
@@ -965,6 +1144,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     clearLeads,
     start,
     stop,
+    pause,
+    resume,
     reset,
     selectLead,
     sendCurrent,
@@ -976,6 +1157,12 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     retryLead,
     retryFailed,
     reviseCurrent,
+    applyBulkEdit,
+    removeBulkEdit,
+    clearBulkEdits,
+    bulkEdits,
+    bulkRevising,
+    bulkReviseProgress,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

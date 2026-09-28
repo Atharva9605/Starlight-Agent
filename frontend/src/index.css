@@ -2478,6 +2478,31 @@ button, input, select, textarea { font: inherit; color: inherit; }
   gap: 0.85rem;
   min-height: calc(100vh - 3rem);
 }
+.bulk-edit-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.bulk-edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.bulk-edit-chips .pill {
+  max-width: min(420px, 100%);
+  gap: 6px;
+}
+.chip-x {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
 .mail-board {
   display: grid;
   grid-template-columns: minmax(300px, 400px) minmax(0, 1fr);

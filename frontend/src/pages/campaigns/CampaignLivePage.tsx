@@ -73,6 +73,8 @@ export function CampaignLivePage() {
     logs,
     counts,
     stop,
+    pause,
+    resume,
     reset,
     livePreview,
     stagesByLead,
@@ -86,6 +88,7 @@ export function CampaignLivePage() {
     sendCurrent,
     skipCurrent,
     reviseCurrent,
+    autosend,
   } = useCampaign()
 
   const [input, setInput] = useState('')
@@ -101,9 +104,12 @@ export function CampaignLivePage() {
   }, [draft?.rowIndex, livePreview?.rowIndex, currentIndex, status])
 
   if (!leads.length) return <Navigate to="/campaigns" replace />
-  if (status === 'reviewing') return <Navigate to="/campaigns/review" replace />
+  if (status === 'reviewing' || (status === 'paused' && !autosend)) {
+    return <Navigate to="/campaigns/review" replace />
+  }
 
   const running = status === 'running'
+  const paused = status === 'paused'
   const activeRun = running || generating
   const pct = counts.progressPct
   const busy = generating || revising || sending
@@ -147,6 +153,7 @@ export function CampaignLivePage() {
 
   const headline = (() => {
     if (running || generating) return `Working lead ${focusIdx + 1} of ${counts.total}`
+    if (paused) return 'Campaign paused'
     if (canReview) return `Review lead ${focusIdx + 1} of ${counts.total}`
     if (status === 'stopped') return 'Campaign stopped'
     if (status === 'done' && left > 0) return `${left} lead${left === 1 ? '' : 's'} still waiting`
@@ -171,10 +178,24 @@ export function CampaignLivePage() {
           </p>
         </div>
         <div className="row">
-          {activeRun || canReview ? (
-            <button className="btn danger" type="button" onClick={stop} disabled={sending}>
-              Stop
-            </button>
+          {paused ? (
+            <>
+              <button className="btn" type="button" onClick={() => void resume()} disabled={sending}>
+                Resume
+              </button>
+              <button className="btn secondary" type="button" onClick={stop} disabled={sending}>
+                Stop
+              </button>
+            </>
+          ) : activeRun || canReview ? (
+            <>
+              <button className="btn secondary" type="button" onClick={pause} disabled={sending}>
+                Pause
+              </button>
+              <button className="btn danger" type="button" onClick={stop} disabled={sending}>
+                Stop
+              </button>
+            </>
           ) : (
             <>
               <button

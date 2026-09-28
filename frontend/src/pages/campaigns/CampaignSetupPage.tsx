@@ -93,7 +93,7 @@ export function CampaignSetupPage() {
     }
   }
 
-  const inFlight = status === 'running' || status === 'reviewing'
+  const inFlight = status === 'running' || status === 'reviewing' || status === 'paused'
 
   return (
     <div>
@@ -107,9 +107,13 @@ export function CampaignSetupPage() {
             <button
               className="btn"
               type="button"
-              onClick={() => nav(status === 'running' ? '/campaigns/live' : '/campaigns/review')}
+              onClick={() =>
+                nav(status === 'running' || (status === 'paused' && autosend) ? '/campaigns/live' : '/campaigns/review')
+              }
             >
-              {status === 'running' ? 'View Live progress Logs' : 'Review emails'}
+              {status === 'running' || (status === 'paused' && autosend)
+                ? 'View Live progress Logs'
+                : 'Review emails'}
             </button>
           ) : (
             <button

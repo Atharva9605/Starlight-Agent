@@ -1334,6 +1334,10 @@ async def process_leads(req: ProcessRequest):
                 })
                 continue
 
+            prior = str(row.get("_status") or "").lower()
+            if "sent" in prior or "✅" in prior or "skip" in prior or "discard" in prior:
+                continue
+
             yield _sse({"type": "status_update", "row_index": idx, "status": "⚙️ Processing..."})
             yield _stage(idx, "queued", "Queued", "done")
 
