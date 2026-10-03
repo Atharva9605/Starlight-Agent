@@ -68,6 +68,12 @@ const I = {
       <path d="M12 5v14M5 12h14" />
     </Icon>
   ),
+  runs: (
+    <Icon>
+      <path d="M12 7v5l3 2" />
+      <circle cx="12" cy="12" r="8" />
+    </Icon>
+  ),
   rag: (
     <Icon>
       <circle cx="11" cy="11" r="6" />
@@ -84,7 +90,8 @@ const I = {
 const salesLinks: NavItem[] = [
   { to: '/', label: 'Home', icon: I.home, end: true },
   { to: '/inbox', label: 'Inbox', icon: I.inbox },
-  { to: '/campaigns', label: 'Campaigns', icon: I.campaigns },
+  { to: '/campaigns', label: 'Campaigns', icon: I.campaigns, end: true },
+  { to: '/campaigns/runs', label: 'Campaign Runs', icon: I.runs },
   { to: '/catalogues', label: 'Catalogues', icon: I.catalogues },
   { to: '/settings', label: 'Settings', icon: I.settings },
 ]

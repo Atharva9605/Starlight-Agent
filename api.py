@@ -6,7 +6,7 @@ import asyncio
 import re
 from functools import partial
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Query
@@ -30,6 +30,7 @@ from org_store import (
     list_organization_members,
 )
 from tenant import get_organization_id, get_tenant_context, run_in_thread
+import campaign_runs
 from ingest_jobs import get_job, start_ingest_job
 import gmail_oauth
 
@@ -95,6 +96,14 @@ app.mount("/media", StaticFiles(directory=str(_static_dir)), name="media")
 @app.on_event("startup")
 async def startup():
     init_db()
+    campaign_runs.set_pipeline(campaign_event_stream)
+    # Campaigns that were mid-flight when the API last went down keep going.
+    try:
+        adopted = await asyncio.to_thread(campaign_runs.adopt_orphaned_runs)
+        if adopted:
+            print(f"Resumed {adopted} in-flight campaign run(s)")
+    except Exception as e:
+        print(f"Could not resume in-flight campaign runs: {e}")
     asyncio.create_task(gmail_sync_loop())
 
 # Legacy CORS block removed — configured above
@@ -1282,303 +1291,559 @@ async def campaign_discard(draft_id: str):
     return {"status": "discarded"}
 
 
+# ---------------------------------------------------------------------------
+# Campaign pipeline
+# ---------------------------------------------------------------------------
+
+def _sse_line(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _stage_payload(idx: int, stage: str, label: str, state: str = "active", **extra) -> dict:
+    return {
+        "type": "stage",
+        "row_index": idx,
+        "stage": stage,
+        "label": label,
+        "state": state,
+        **extra,
+    }
+
+
+async def campaign_event_stream(
+    leads: List[dict],
+    *,
+    template: str = "email_template.html",
+    delay: int = 3,
+    sender_email: str = "",
+    recipient_override: Optional[str] = "",
+    attach_product_sheet: bool = True,
+    autosend: bool = True,
+    control: Optional[Callable[[], str]] = None,
+):
+    """
+    Run the lead pipeline, yielding event payloads (the dicts the SSE stream and
+    the durable run worker both consume).
+
+    `control()` is polled before each lead; returning "pause" or "stop" ends the
+    run after the lead in flight, so no half-sent email is left behind. Leads
+    whose `_status` already says sent / skipped / discarded are passed over,
+    which is what lets a resumed run pick up where it stopped.
+    """
+    org_id = get_organization_id()
+    outdir = os.path.join("out_emails_api", org_id)
+    os.makedirs(outdir, exist_ok=True)
+
+    gmail_status = gmail_oauth.get_integration_status(org_id)
+    sender_from = gmail_status.get("email") or sender_email or ""
+    yield {
+        "type": "run_meta",
+        "sender_email": sender_from,
+        "gmail_mode": gmail_status.get("mode"),
+        "total": len(leads),
+    }
+
+    for idx, row in enumerate(leads):
+        if control is not None:
+            signal = control()
+            if signal in {"pause", "stop"}:
+                yield {"type": "control", "signal": signal}
+                return
+
+        row = dict(row or {})
+        had_website = bool(clean_lead_value(row.get("website")))
+        search_name = lead_search_name(row)
+
+        if not had_website and not search_name:
+            yield {
+                "type": "status_update",
+                "row_index": idx,
+                "status": "⏭ Skipped (no website or name)",
+            }
+            yield {
+                "type": "log",
+                "message": f"Skipping lead {idx + 1}: need website or company/name",
+            }
+            continue
+
+        prior = str(row.get("_status") or "").lower()
+        if "sent" in prior or "✅" in prior or "skip" in prior or "discard" in prior:
+            continue
+
+        yield {"type": "status_update", "row_index": idx, "status": "⚙️ Processing..."}
+        yield _stage_payload(idx, "queued", "Queued", "done")
+
+        try:
+            if not had_website:
+                yield _stage_payload(idx, "discover", f"Finding website for {search_name}")
+                yield {
+                    "type": "log",
+                    "message": f"OpenSERP lookup: {search_name}",
+                }
+                try:
+                    website = await run_in_thread(ensure_lead_website, row)
+                except ValueError as e:
+                    raise Exception(str(e)) from e
+                yield _stage_payload(
+                    idx,
+                    "discover",
+                    f"Found {website}",
+                    "done",
+                    website=website,
+                    company=search_name,
+                )
+                yield {
+                    "type": "lead_resolved",
+                    "row_index": idx,
+                    "website": website,
+                    "company": row.get("company") or search_name,
+                }
+            else:
+                website = await run_in_thread(ensure_lead_website, row)
+
+            yield _stage_payload(idx, "scrape", "Scraping website")
+            yield {"type": "log", "message": f"Scraping: {website}"}
+
+            original_website = website
+            scraped_data = None
+            used_fallback = False
+            website, scraped_data, used_fallback = await _scrape_with_openserp_fallback(
+                row, website
+            )
+            if used_fallback:
+                yield _stage_payload(
+                    idx,
+                    "discover",
+                    f"Sheet URL failed · OpenSERP found {website}",
+                    "done",
+                    website=website,
+                )
+                yield {
+                    "type": "log",
+                    "message": f"Could not scrape {original_website}; OpenSERP → {website}",
+                }
+                yield {
+                    "type": "lead_resolved",
+                    "row_index": idx,
+                    "website": website,
+                    "company": row.get("company") or search_name,
+                }
+                yield _stage_payload(idx, "scrape", f"Scraping {website}")
+
+            if not scraped_data:
+                raise Exception(
+                    f"Could not reach {original_website}. "
+                    f"OpenSERP also found no reachable site"
+                    + (f" for '{search_name}'." if search_name else ".")
+                )
+
+            company = company_from_website(
+                website, row.get("company") or scraped_data.get("company") or search_name or ""
+            )
+            yield _stage_payload(idx, "scrape", "Website profile ready", "done", company=company)
+            yield _stage_payload(idx, "analyze", "Analyzing company needs")
+
+            _apply_recipient(
+                scraped_data,
+                recipient_override=recipient_override,
+                lead=row,
+            )
+            yield _stage_payload(idx, "analyze", "Company analyzed", "done")
+
+            yield _stage_payload(idx, "retrieve", "Matching catalogue & writing email")
+            yield {"type": "log", "message": f"Generating EML for: {website}"}
+
+            eml_path, trace_info = await run_in_thread(
+                generate_eml_from_record,
+                scraped_data,
+                idx + 1,
+                outdir,
+                template,
+                attach_product_sheet=attach_product_sheet,
+            )
+
+            if not eml_path or not os.path.exists(eml_path):
+                raise Exception("EML generation failed.")
+
+            n_products = len((trace_info or {}).get("product_refs") or [])
+            yield _stage_payload(
+                idx,
+                "retrieve",
+                f"Matched {n_products} catalogue product{'s' if n_products != 1 else ''}",
+                "done",
+                product_count=n_products,
+            )
+            yield _stage_payload(idx, "draft", "Draft written", "done")
+            yield _stage_payload(idx, "render", "Rendering HTML preview")
+
+            html_content = ""
+            html_path = Path(eml_path).with_suffix(".html")
+            subject = (trace_info or {}).get("subject", "") or ""
+            if html_path.exists():
+                with open(html_path, "r", encoding="utf-8") as f:
+                    html_content = f.read()
+
+            sheet_name = (trace_info or {}).get("product_sheet_name") or ""
+            yield _stage_payload(idx, "render", "Preview ready", "done")
+            yield {
+                "type": "preview_html",
+                "row_index": idx,
+                "subject": subject,
+                "html": html_content,
+                "company": company,
+                "website": website,
+                "to": str(scraped_data.get("emails", "")).split(",")[0].strip(),
+                "from": sender_from,
+                "product_count": n_products,
+                "product_sheet": sheet_name,
+                "attached_product_sheet": bool((trace_info or {}).get("attached_product_sheet")),
+            }
+
+            yield {
+                "type": "rag_trace",
+                "row_index": idx,
+                "data": {
+                    "company": scraped_data.get("company", website),
+                    "website": website,
+                    "trace_info": trace_info,
+                },
+            }
+
+            if not autosend:
+                to_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
+                draft_id = store_draft({
+                    "organization_id": org_id,
+                    "outdir": outdir,
+                    "eml_path": eml_path,
+                    "html_path": str(html_path),
+                    "subject": subject,
+                    "html": html_content,
+                    "from": (trace_info or {}).get("from") or sender_from,
+                    "to": to_email,
+                    "website": website,
+                    "company": company,
+                    "template": template,
+                    "sender_email": sender_email or sender_from,
+                    "scraped_data": scraped_data,
+                    "row_index": idx,
+                    "chat": [],
+                })
+                yield {
+                    "type": "draft_ready",
+                    "row_index": idx,
+                    "draft_id": draft_id,
+                    "subject": subject,
+                    "html": html_content,
+                    "to": to_email,
+                }
+                yield {"type": "status_update", "row_index": idx, "status": "📝 Ready for review"}
+                continue
+
+            yield _stage_payload(
+                idx,
+                "send",
+                f"Sending via Gmail{f' as {sender_from}' if sender_from else ''}",
+            )
+            yield {"type": "log", "message": f"Sending email via Gmail for {website}"}
+            send_result = await run_in_thread(
+                send_email_gsuite, eml_path, sender_email or sender_from or None, org_id
+            )
+
+            if not send_result.get("success"):
+                raise Exception(send_result.get("error", "Gmail sending failed."))
+
+            recipient_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
+            body_text = ""
+            if html_path.exists():
+                from email import message_from_string
+                with open(eml_path, "r", encoding="utf-8") as f:
+                    eml_raw = f.read()
+                eml_msg = message_from_string(eml_raw)
+                subject = subject or eml_msg.get("Subject", "")
+                for part in eml_msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        body_text = part.get_payload(decode=True).decode("utf-8", errors="replace")
+                        break
+
+            if use_postgres() and recipient_email:
+                try:
+                    await asyncio.to_thread(
+                        record_outbound_from_pipeline,
+                        client_email=recipient_email,
+                        client_company=row.get("company")
+                        or scraped_data.get("company")
+                        or urlparse(website).netloc.replace("www.", ""),
+                        client_website=website,
+                        subject=subject,
+                        body_html=html_content,
+                        body_text=body_text,
+                        profile_json=scraped_data,
+                        template_name=template,
+                        gmail_message_id=send_result.get("message_id") or "",
+                        gmail_thread_id=send_result.get("thread_id") or "",
+                    )
+                    yield {"type": "log", "message": f"Conversation created for {recipient_email}"}
+                except Exception as conv_err:
+                    yield {"type": "log", "message": f"Warning: conversation not saved: {conv_err}"}
+
+            yield _stage_payload(idx, "send", "Sent", "done")
+            yield {"type": "log", "message": f"Email sent successfully for: {website}"}
+            yield {"type": "status_update", "row_index": idx, "status": "✅ Sent"}
+
+        except Exception as e:
+            err_msg = str(e)
+            if "Content filter triggered" in err_msg:
+                log_msg = (
+                    f"Policy Violation: Azure's safety filters flagged the content for {website}. "
+                    "This often happens if the website content or our prompt looks suspicious to the AI."
+                )
+                status_msg = "❌ Safety Filter Triggered"
+            else:
+                log_msg = f"Error processing {website}: {err_msg}"
+                status_msg = f"❌ Failed: {err_msg[:50]}..."
+
+            yield _stage_payload(idx, "error", err_msg[:120], "error")
+            yield {"type": "log", "message": log_msg}
+            yield {"type": "status_update", "row_index": idx, "status": status_msg}
+
+        await asyncio.sleep(delay)
+
+    yield {"type": "done", "message": "Processing complete!"}
+
+
 @app.post("/api/process-stream")
 async def process_leads(req: ProcessRequest):
     """
-    Initiates processing of leads.
-    Returns a Server-Sent Events (SSE) stream.
-    When autosend=false, drafts are generated and emitted but not sent
-    (prefer /api/campaign/generate for interactive review).
+    Tab-bound SSE run: the stream dies with the request.
+
+    Review mode still uses it (the reviewer is at the keyboard anyway). For
+    autosend prefer POST /api/campaign/runs, which keeps sending after the tab
+    is closed.
     """
-    def _sse(payload: dict) -> str:
-        return f"data: {json.dumps(payload)}\n\n"
-
-    def _stage(idx: int, stage: str, label: str, state: str = "active", **extra) -> str:
-        return _sse({
-            "type": "stage",
-            "row_index": idx,
-            "stage": stage,
-            "label": label,
-            "state": state,
-            **extra,
-        })
-
     async def event_stream():
-        org_id = get_organization_id()
-        outdir = os.path.join("out_emails_api", org_id)
-        os.makedirs(outdir, exist_ok=True)
-
-        gmail_status = gmail_oauth.get_integration_status(org_id)
-        sender_from = gmail_status.get("email") or req.sender_email or ""
-        yield _sse({
-            "type": "run_meta",
-            "sender_email": sender_from,
-            "gmail_mode": gmail_status.get("mode"),
-            "total": len(req.leads),
-        })
-
-        for idx, row in enumerate(req.leads):
-            row = dict(row or {})
-            had_website = bool(clean_lead_value(row.get("website")))
-            search_name = lead_search_name(row)
-
-            if not had_website and not search_name:
-                yield _sse({
-                    "type": "status_update",
-                    "row_index": idx,
-                    "status": "⏭ Skipped (no website or name)",
-                })
-                yield _sse({
-                    "type": "log",
-                    "message": f"Skipping lead {idx + 1}: need website or company/name",
-                })
-                continue
-
-            prior = str(row.get("_status") or "").lower()
-            if "sent" in prior or "✅" in prior or "skip" in prior or "discard" in prior:
-                continue
-
-            yield _sse({"type": "status_update", "row_index": idx, "status": "⚙️ Processing..."})
-            yield _stage(idx, "queued", "Queued", "done")
-
-            try:
-                if not had_website:
-                    yield _stage(idx, "discover", f"Finding website for {search_name}")
-                    yield _sse({
-                        "type": "log",
-                        "message": f"OpenSERP lookup: {search_name}",
-                    })
-                    try:
-                        website = await run_in_thread(ensure_lead_website, row)
-                    except ValueError as e:
-                        raise Exception(str(e)) from e
-                    yield _stage(
-                        idx,
-                        "discover",
-                        f"Found {website}",
-                        "done",
-                        website=website,
-                        company=search_name,
-                    )
-                    yield _sse({
-                        "type": "lead_resolved",
-                        "row_index": idx,
-                        "website": website,
-                        "company": row.get("company") or search_name,
-                    })
-                else:
-                    website = await run_in_thread(ensure_lead_website, row)
-
-                yield _stage(idx, "scrape", "Scraping website")
-                yield _sse({"type": "log", "message": f"Scraping: {website}"})
-
-                original_website = website
-                scraped_data = None
-                used_fallback = False
-                website, scraped_data, used_fallback = await _scrape_with_openserp_fallback(
-                    row, website
-                )
-                if used_fallback:
-                    yield _stage(
-                        idx,
-                        "discover",
-                        f"Sheet URL failed · OpenSERP found {website}",
-                        "done",
-                        website=website,
-                    )
-                    yield _sse({
-                        "type": "log",
-                        "message": f"Could not scrape {original_website}; OpenSERP → {website}",
-                    })
-                    yield _sse({
-                        "type": "lead_resolved",
-                        "row_index": idx,
-                        "website": website,
-                        "company": row.get("company") or search_name,
-                    })
-                    yield _stage(idx, "scrape", f"Scraping {website}")
-
-                if not scraped_data:
-                    raise Exception(
-                        f"Could not reach {original_website}. "
-                        f"OpenSERP also found no reachable site"
-                        + (f" for '{search_name}'." if search_name else ".")
-                    )
-
-                company = company_from_website(
-                    website, row.get("company") or scraped_data.get("company") or search_name or ""
-                )
-                yield _stage(idx, "scrape", "Website profile ready", "done", company=company)
-                yield _stage(idx, "analyze", "Analyzing company needs")
-
-                _apply_recipient(
-                    scraped_data,
-                    recipient_override=req.recipient_override,
-                    lead=row,
-                )
-                yield _stage(idx, "analyze", "Company analyzed", "done")
-
-                yield _stage(idx, "retrieve", "Matching catalogue & writing email")
-                yield _sse({"type": "log", "message": f"Generating EML for: {website}"})
-
-                eml_path, trace_info = await run_in_thread(
-                    generate_eml_from_record,
-                    scraped_data,
-                    idx + 1,
-                    outdir,
-                    req.template,
-                    attach_product_sheet=req.attach_product_sheet,
-                )
-
-                if not eml_path or not os.path.exists(eml_path):
-                    raise Exception("EML generation failed.")
-
-                n_products = len((trace_info or {}).get("product_refs") or [])
-                yield _stage(
-                    idx,
-                    "retrieve",
-                    f"Matched {n_products} catalogue product{'s' if n_products != 1 else ''}",
-                    "done",
-                    product_count=n_products,
-                )
-                yield _stage(idx, "draft", "Draft written", "done")
-                yield _stage(idx, "render", "Rendering HTML preview")
-
-                html_content = ""
-                html_path = Path(eml_path).with_suffix(".html")
-                subject = (trace_info or {}).get("subject", "") or ""
-                if html_path.exists():
-                    with open(html_path, "r", encoding="utf-8") as f:
-                        html_content = f.read()
-
-                sheet_name = (trace_info or {}).get("product_sheet_name") or ""
-                yield _stage(idx, "render", "Preview ready", "done")
-                yield _sse({
-                    "type": "preview_html",
-                    "row_index": idx,
-                    "subject": subject,
-                    "html": html_content,
-                    "company": company,
-                    "website": website,
-                    "to": str(scraped_data.get("emails", "")).split(",")[0].strip(),
-                    "from": sender_from,
-                    "product_count": n_products,
-                    "product_sheet": sheet_name,
-                    "attached_product_sheet": bool((trace_info or {}).get("attached_product_sheet")),
-                })
-
-                yield _sse({
-                    "type": "rag_trace",
-                    "row_index": idx,
-                    "data": {
-                        "company": scraped_data.get("company", website),
-                        "website": website,
-                        "trace_info": trace_info,
-                    },
-                })
-
-                if not req.autosend:
-                    to_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
-                    draft_id = store_draft({
-                        "organization_id": org_id,
-                        "outdir": outdir,
-                        "eml_path": eml_path,
-                        "html_path": str(html_path),
-                        "subject": subject,
-                        "html": html_content,
-                        "from": (trace_info or {}).get("from") or sender_from,
-                        "to": to_email,
-                        "website": website,
-                        "company": company,
-                        "template": req.template,
-                        "sender_email": req.sender_email or sender_from,
-                        "scraped_data": scraped_data,
-                        "row_index": idx,
-                        "chat": [],
-                    })
-                    yield _sse({
-                        "type": "draft_ready",
-                        "row_index": idx,
-                        "draft_id": draft_id,
-                        "subject": subject,
-                        "html": html_content,
-                        "to": to_email,
-                    })
-                    yield _sse({"type": "status_update", "row_index": idx, "status": "📝 Ready for review"})
-                    continue
-
-                yield _stage(
-                    idx,
-                    "send",
-                    f"Sending via Gmail{f' as {sender_from}' if sender_from else ''}",
-                )
-                yield _sse({"type": "log", "message": f"Sending email via Gmail for {website}"})
-                send_result = await run_in_thread(
-                    send_email_gsuite, eml_path, req.sender_email or sender_from or None, org_id
-                )
-
-                if not send_result.get("success"):
-                    raise Exception(send_result.get("error", "Gmail sending failed."))
-
-                recipient_email = str(scraped_data.get("emails", "")).split(",")[0].strip()
-                body_text = ""
-                if html_path.exists():
-                    from email import message_from_string
-                    with open(eml_path, "r", encoding="utf-8") as f:
-                        eml_raw = f.read()
-                    eml_msg = message_from_string(eml_raw)
-                    subject = subject or eml_msg.get("Subject", "")
-                    for part in eml_msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body_text = part.get_payload(decode=True).decode("utf-8", errors="replace")
-                            break
-
-                if use_postgres() and recipient_email:
-                    try:
-                        await asyncio.to_thread(
-                            record_outbound_from_pipeline,
-                            client_email=recipient_email,
-                            client_company=row.get("company")
-                            or scraped_data.get("company")
-                            or urlparse(website).netloc.replace("www.", ""),
-                            client_website=website,
-                            subject=subject,
-                            body_html=html_content,
-                            body_text=body_text,
-                            profile_json=scraped_data,
-                            template_name=req.template,
-                            gmail_message_id=send_result.get("message_id") or "",
-                            gmail_thread_id=send_result.get("thread_id") or "",
-                        )
-                        yield _sse({"type": "log", "message": f"Conversation created for {recipient_email}"})
-                    except Exception as conv_err:
-                        yield _sse({"type": "log", "message": f"Warning: conversation not saved: {conv_err}"})
-
-                yield _stage(idx, "send", "Sent", "done")
-                yield _sse({"type": "log", "message": f"Email sent successfully for: {website}"})
-                yield _sse({"type": "status_update", "row_index": idx, "status": "✅ Sent"})
-
-            except Exception as e:
-                err_msg = str(e)
-                if "Content filter triggered" in err_msg:
-                    log_msg = (
-                        f"Policy Violation: Azure's safety filters flagged the content for {website}. "
-                        "This often happens if the website content or our prompt looks suspicious to the AI."
-                    )
-                    status_msg = "❌ Safety Filter Triggered"
-                else:
-                    log_msg = f"Error processing {website}: {err_msg}"
-                    status_msg = f"❌ Failed: {err_msg[:50]}..."
-
-                yield _stage(idx, "error", err_msg[:120], "error")
-                yield _sse({"type": "log", "message": log_msg})
-                yield _sse({"type": "status_update", "row_index": idx, "status": status_msg})
-
-            await asyncio.sleep(req.delay)
-
-        yield _sse({"type": "done", "message": "Processing complete!"})
+        async for payload in campaign_event_stream(
+            req.leads,
+            template=req.template,
+            delay=req.delay,
+            sender_email=req.sender_email,
+            recipient_override=req.recipient_override,
+            attach_product_sheet=req.attach_product_sheet,
+            autosend=req.autosend,
+        ):
+            yield _sse_line(payload)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# Durable campaign runs — survive a closed tab, resumable, replayable
+# ---------------------------------------------------------------------------
+
+class CampaignRunRequest(BaseModel):
+    leads: List[dict]
+    sender_email: str = ""
+    recipient_override: Optional[str] = ""
+    template: str = "email_template.html"
+    delay: int = 3
+    attach_product_sheet: bool = True
+    file_name: str = ""
+
+
+def _require_runs_db() -> None:
+    if not use_postgres():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Background campaigns need DATABASE_URL (PostgreSQL). "
+                "Without it a run cannot outlive the browser tab."
+            ),
+        )
+
+
+def _run_or_404(run_id: str) -> dict:
+    run = campaign_runs.get_run(run_id, get_organization_id())
+    if not run:
+        raise HTTPException(status_code=404, detail="Campaign run not found")
+    return run
+
+
+@app.post("/api/campaign/runs")
+async def create_campaign_run(req: CampaignRunRequest):
+    """
+    Start a campaign on the server. The run keeps sending after the tab closes;
+    the client follows along over /stream and can reattach at any time.
+    """
+    _require_runs_db()
+    if not req.leads:
+        raise HTTPException(status_code=400, detail="No leads to send")
+
+    ctx = get_tenant_context()
+    run_id = await asyncio.to_thread(
+        campaign_runs.create_run,
+        organization_id=ctx.organization_id,
+        leads=req.leads,
+        options={
+            "template": req.template,
+            "delay": req.delay,
+            "sender_email": req.sender_email,
+            "recipient_override": req.recipient_override,
+            "attach_product_sheet": req.attach_product_sheet,
+            "autosend": True,
+        },
+        file_name=req.file_name,
+        created_by=ctx.user_id,
+        created_by_email=ctx.email,
+    )
+    started = await asyncio.to_thread(campaign_runs.start_worker, run_id, ctx)
+    if not started:
+        raise HTTPException(status_code=409, detail="Could not start the campaign worker")
+    return {"run_id": run_id, "status": "running"}
+
+
+@app.get("/api/campaign/runs")
+async def list_campaign_runs(status: Optional[str] = None, limit: int = 50):
+    _require_runs_db()
+    runs = await asyncio.to_thread(
+        campaign_runs.list_runs, get_organization_id(), min(max(limit, 1), 200), status
+    )
+    return {"runs": runs}
+
+
+@app.get("/api/campaign/runs/active")
+async def active_campaign_run():
+    """The run a reopened tab should snap back to, if any."""
+    _require_runs_db()
+    runs = await asyncio.to_thread(
+        campaign_runs.list_runs, get_organization_id(), 1, "active"
+    )
+    return {"run": runs[0] if runs else None}
+
+
+@app.get("/api/campaign/runs/{run_id}")
+async def get_campaign_run(run_id: str):
+    """Full run record: options, every lead with its latest preview, and logs."""
+    _require_runs_db()
+    _run_or_404(run_id)
+    snapshot = await asyncio.to_thread(
+        campaign_runs.run_snapshot, run_id, get_organization_id()
+    )
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Campaign run not found")
+    return snapshot
+
+
+@app.get("/api/campaign/runs/{run_id}/leads/{row_index}/html")
+async def get_campaign_run_lead_html(run_id: str, row_index: int):
+    _require_runs_db()
+    _run_or_404(run_id)
+    html = await asyncio.to_thread(campaign_runs.lead_html, run_id, row_index)
+    return {"html": html}
+
+
+@app.get("/api/campaign/runs/{run_id}/stream")
+async def stream_campaign_run(run_id: str, cursor: int = 0):
+    """
+    Live event feed for a run, replayed from `cursor`.
+
+    Events are read from Postgres rather than from the worker's memory, so any
+    number of tabs can watch, and a tab that reconnects after a restart picks up
+    exactly where its cursor left off.
+    """
+    _require_runs_db()
+    org_id = get_organization_id()
+    _run_or_404(run_id)
+
+    async def event_stream():
+        position = cursor
+        last_status = ""
+        while True:
+            events = await asyncio.to_thread(
+                campaign_runs.events_since, run_id, position, 400
+            )
+            for event in events:
+                position = event["id"]
+                yield _sse_line({**event["payload"], "_cursor": position})
+
+            run = await asyncio.to_thread(campaign_runs.get_run, run_id, org_id)
+            if not run:
+                yield _sse_line({"type": "run_closed", "status": "deleted"})
+                return
+            status = run["status"]
+            if status != last_status:
+                last_status = status
+                yield _sse_line({
+                    "type": "run_status",
+                    "status": status,
+                    "cursor": position,
+                    "counts": run["counts"],
+                })
+            if len(events) >= 400:
+                continue
+            if status != "running":
+                yield _sse_line({"type": "run_closed", "status": status})
+                return
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/campaign/runs/{run_id}/pause")
+async def pause_campaign_run(run_id: str):
+    _require_runs_db()
+    run = _run_or_404(run_id)
+    if run["status"] != "running":
+        return {"status": run["status"]}
+    await asyncio.to_thread(
+        campaign_runs.set_control, run_id, "pause", get_organization_id()
+    )
+    return {"status": "pausing"}
+
+
+@app.post("/api/campaign/runs/{run_id}/stop")
+async def stop_campaign_run(run_id: str):
+    _require_runs_db()
+    run = _run_or_404(run_id)
+    org_id = get_organization_id()
+    await asyncio.to_thread(campaign_runs.set_control, run_id, "stop", org_id)
+    if run["status"] != "running":
+        # No worker to notice the signal — close the run out here.
+        await asyncio.to_thread(campaign_runs.set_status, run_id, "stopped")
+    return {"status": "stopping"}
+
+
+@app.post("/api/campaign/runs/{run_id}/resume")
+async def resume_campaign_run(run_id: str):
+    """Hand the run back to a worker; it restarts at the first unsent lead."""
+    _require_runs_db()
+    run = _run_or_404(run_id)
+    if run["status"] == "running" and campaign_runs.is_worker_live(run_id):
+        return {"status": "running"}
+    if run["counts"].get("retriable", run["counts"]["pending"]) <= 0:
+        return {"status": run["status"], "message": "Nothing left to send"}
+
+    ctx = get_tenant_context()
+    await asyncio.to_thread(campaign_runs.set_control, run_id, "run", ctx.organization_id)
+    started = await asyncio.to_thread(campaign_runs.start_worker, run_id, ctx)
+    if not started:
+        raise HTTPException(
+            status_code=409,
+            detail="This run is already being worked on somewhere else",
+        )
+    return {"status": "running"}
+
+
+@app.delete("/api/campaign/runs/{run_id}")
+async def delete_campaign_run(run_id: str):
+    _require_runs_db()
+    run = _run_or_404(run_id)
+    if run["status"] == "running":
+        raise HTTPException(status_code=409, detail="Stop the run before deleting it")
+    await asyncio.to_thread(campaign_runs.delete_run, run_id, get_organization_id())
+    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------

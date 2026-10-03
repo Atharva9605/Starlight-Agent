@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Dropzone } from '../../components/Dropzone'
 import { TEMPLATES, useCampaign } from '../../campaign/CampaignContext'
 import { api } from '../../api/client'
@@ -42,6 +42,8 @@ export function CampaignSetupPage() {
     clearLeads,
     start,
     status,
+    finishedRun,
+    dismissFinishedRun,
   } = useCampaign()
 
   const [busy, setBusy] = useState(false)
@@ -127,6 +129,27 @@ export function CampaignSetupPage() {
           )}
         </div>
       </div>
+
+      {finishedRun ? (
+        <div className="panel stack">
+          <strong style={{ fontFamily: 'var(--display)' }}>
+            Your last campaign finished while you were away
+          </strong>
+          <p className="muted" style={{ margin: 0 }}>
+            {finishedRun.counts.sent} sent · {finishedRun.counts.failed} failed
+            {finishedRun.counts.pending ? ` · ${finishedRun.counts.pending} never sent` : ''}
+            {finishedRun.file_name ? ` · ${finishedRun.file_name}` : ''}
+          </p>
+          <div className="row" style={{ gap: 8 }}>
+            <Link to={`/campaigns/runs/${finishedRun.id}`} className="btn">
+              See the whole run
+            </Link>
+            <button className="btn secondary" type="button" onClick={dismissFinishedRun}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="setup-grid">
         <div className="stack">

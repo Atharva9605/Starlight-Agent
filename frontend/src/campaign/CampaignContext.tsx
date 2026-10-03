@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api, getApiBase } from '../api/client'
+import type { CampaignRun, CampaignRunStatus } from '../api/client'
 
 export type Lead = Record<string, any>
 export type RunStatus = 'idle' | 'running' | 'reviewing' | 'paused' | 'done' | 'stopped' | 'failed'
@@ -39,6 +40,29 @@ export type Draft = {
 }
 
 const GEN_CONCURRENCY = 3
+
+/**
+ * The run a tab should snap back to after a reload. The server is the source of
+ * truth; this is only a hint so a finished run can still be offered up.
+ */
+const RUN_STORAGE_KEY = 'starlight_campaign_run_id'
+
+function runStatusToLocal(status: CampaignRunStatus | string | undefined): RunStatus {
+  switch (status) {
+    case 'running':
+      return 'running'
+    case 'paused':
+      return 'paused'
+    case 'stopped':
+      return 'stopped'
+    case 'failed':
+      return 'failed'
+    case 'done':
+      return 'done'
+    default:
+      return 'idle'
+  }
+}
 
 export const TEMPLATES = [
   {
@@ -140,6 +164,13 @@ type CampaignValue = {
   stagesByLead: Record<number, StageEvent[]>
   draftsByLead: Record<number, Draft>
   runSender: string
+  /** Server-side run backing the current campaign, if any. */
+  runId: string | null
+  runRecord: CampaignRun | null
+  /** True while a snapshot is being loaded, so pages wait instead of redirecting. */
+  attaching: boolean
+  /** A run that finished while this tab was away — offer it, do not hijack. */
+  finishedRun: CampaignRun | null
   counts: {
     total: number
     sent: number
@@ -179,6 +210,10 @@ type CampaignValue = {
   applyBulkEdit: (message: string) => Promise<void>
   removeBulkEdit: (index: number) => void
   clearBulkEdits: () => void
+  attachRun: (runId: string) => Promise<CampaignRun | undefined>
+  dismissFinishedRun: () => void
+  /** Pull a lead's email body from the run record (bodies are not kept in state). */
+  loadLeadPreview: (index: number) => Promise<void>
   bulkEdits: string[]
   bulkRevising: boolean
   bulkReviseProgress: { done: number; total: number }
@@ -209,11 +244,14 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const [stagesByLead, setStagesByLead] = useState<Record<number, StageEvent[]>>({})
   const [draftsByLead, setDraftsByLead] = useState<Record<number, Draft>>({})
   const [runSender, setRunSender] = useState('')
+  const [runId, setRunId] = useState<string | null>(null)
+  const [runRecord, setRunRecord] = useState<CampaignRun | null>(null)
+  const [attaching, setAttaching] = useState(false)
+  const [finishedRun, setFinishedRun] = useState<CampaignRun | null>(null)
   const [bulkEdits, setBulkEdits] = useState<string[]>([])
   const [bulkRevising, setBulkRevising] = useState(false)
   const [bulkReviseProgress, setBulkReviseProgress] = useState({ done: 0, total: 0 })
 
-  const abortRef = useRef<AbortController | null>(null)
   const stopReviewRef = useRef(false)
   const pauseRef = useRef(false)
   const bulkEditsRef = useRef<string[]>([])
@@ -223,8 +261,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const draftsRef = useRef<Record<number, Draft>>({})
   const chatByLeadRef = useRef<Record<number, ChatMessage[]>>({})
   const optsRef = useRef({ template, delay, recipientOverride, senderEmail, autosend, attachProductSheet })
+  const streamAbortRef = useRef<AbortController | null>(null)
+  const cursorRef = useRef(0)
+  const runIdRef = useRef<string | null>(null)
+  const previewFetchRef = useRef<Set<number>>(new Set())
   leadsRef.current = leads
   currentIndexRef.current = currentIndex
+  runIdRef.current = runId
   optsRef.current = { template, delay, recipientOverride, senderEmail, autosend, attachProductSheet }
 
 
@@ -251,7 +294,31 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setLeads((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
+  const forgetRun = () => {
+    streamAbortRef.current?.abort()
+    streamAbortRef.current = null
+    cursorRef.current = 0
+    setRunId(null)
+    setRunRecord(null)
+    setFinishedRun(null)
+    try {
+      localStorage.removeItem(RUN_STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const dismissFinishedRun = useCallback(() => {
+    setFinishedRun(null)
+    try {
+      localStorage.removeItem(RUN_STORAGE_KEY)
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
   const clearLeads = useCallback(() => {
+    forgetRun()
     setLeads([])
     setFileName('')
     setDraft(null)
@@ -273,7 +340,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const reset = useCallback(() => {
-    abortRef.current?.abort()
+    forgetRun()
     stopReviewRef.current = true
     setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
     setDraft(null)
@@ -301,19 +368,34 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const stop = useCallback(() => {
-    abortRef.current?.abort()
     pauseRef.current = false
     stopReviewRef.current = true
-    setStatus('stopped')
     setGenerating(false)
+    const id = runIdRef.current
+    if (id) {
+      setStatus('stopped')
+      void api.stopCampaignRun(id).catch((e) =>
+        setLogs((prev) => [...prev, e?.message || 'Could not stop the run']),
+      )
+      return
+    }
+    setStatus('stopped')
   }, [])
 
   const pause = useCallback(() => {
-    abortRef.current?.abort()
     pauseRef.current = true
     stopReviewRef.current = true
-    setStatus('paused')
     setGenerating(false)
+    const id = runIdRef.current
+    if (id) {
+      // The worker finishes the lead in flight, then stops — never mid-send.
+      setLogs((prev) => [...prev, 'Pausing after the lead currently in flight…'])
+      void api.pauseCampaignRun(id).catch((e) =>
+        setLogs((prev) => [...prev, e?.message || 'Could not pause the run']),
+      )
+      return
+    }
+    setStatus('paused')
   }, [])
 
   const setLeadStatus = (index: number, st: string) => {
@@ -704,155 +786,338 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     reviewSettled()
   }, [generateAt])
 
-  const startAutosend = useCallback(async (resume = false) => {
-    setStatus('running')
-    pauseRef.current = false
-    stopReviewRef.current = false
-    if (!resume) {
-      setLogs([])
-      setDraft(null)
-      setLivePreview(null)
-      setStagesByLead({})
-      setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
-    }
+  // -------------------------------------------------------------------------
+  // Durable runs: the campaign lives on the server, the tab only watches it
+  // -------------------------------------------------------------------------
 
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    const token = localStorage.getItem('token')
-    const opts = optsRef.current
-
+  /**
+   * Fetch one lead's email body on demand.
+   *
+   * Bodies are deliberately kept out of the event log and out of snapshots (a
+   * few hundred leads is megabytes of markup), so the page asks for the one it
+   * is about to show.
+   */
+  const loadLeadPreview = useCallback(async (index: number) => {
+    const id = runIdRef.current
+    if (!id || index < 0) return
+    if (previewFetchRef.current.has(index)) return
+    previewFetchRef.current.add(index)
     try {
-      const res = await fetch(`${getApiBase()}/api/process-stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          leads: leadsRef.current,
-          template: opts.template,
-          delay: opts.delay,
-          sender_email: opts.senderEmail,
-          recipient_override: opts.recipientOverride,
-          attach_product_sheet: opts.attachProductSheet,
-          autosend: true,
-        }),
-        signal: ctrl.signal,
+      const res = await api.campaignRunLeadHtml(id, index)
+      if (!res.html) return
+      setLeads((prev) => {
+        const next = prev.map((l, i) => (i === index ? { ...l, _preview_html: res.html } : l))
+        leadsRef.current = next
+        return next
       })
-      if (!res.ok || !res.body) throw new Error(await res.text())
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const chunks = buffer.split('\n\n')
-        buffer = chunks.pop() || ''
-
-        for (const chunk of chunks) {
-          const line = chunk.split('\n').find((l) => l.startsWith('data:'))
-          if (!line) continue
-          let evt: any
-          try {
-            evt = JSON.parse(line.slice(5).trim())
-          } catch {
-            continue
-          }
-          if (evt.type === 'log') setLogs((prev) => [...prev, evt.message || String(evt)])
-          if (evt.type === 'run_meta') {
-            if (evt.sender_email) setRunSender(evt.sender_email)
-          }
-          if (evt.type === 'status_update') {
-            setLeadStatus(evt.row_index, evt.status)
-            setCurrentIndex(evt.row_index)
-          }
-          if (evt.type === 'lead_resolved') {
-            setLeads((prev) =>
-              prev.map((l, i) =>
-                i === evt.row_index
-                  ? {
-                      ...l,
-                      website: evt.website || l.website,
-                      company: evt.company || l.company,
-                    }
-                  : l,
-              ),
-            )
-          }
-          if (evt.type === 'stage') {
-            pushStage(evt.row_index, {
-              stage: evt.stage,
-              label: evt.label,
-              state: evt.state || 'active',
-            })
-            setCurrentIndex(evt.row_index)
-          }
-          if (evt.type === 'preview_html') {
-            const preview: LivePreview = {
-              rowIndex: evt.row_index,
-              html: evt.html || '',
-              subject: evt.subject || 'Starlight outreach',
-              company: evt.company,
-              website: evt.website,
-              to: evt.to,
-              from: evt.from,
-              productCount: evt.product_count,
-              productSheet: evt.product_sheet,
-            }
-            setLivePreview(preview)
-            setCurrentIndex(evt.row_index)
-            setLeads((prev) =>
-              prev.map((l, i) =>
-                i === evt.row_index
-                  ? {
-                      ...l,
-                      _preview_html: preview.html,
-                      _subject: preview.subject,
-                      _product_sheet: preview.productSheet,
-                      _product_count: preview.productCount,
-                    }
-                  : l,
-              ),
-            )
-          }
-          if (evt.type === 'done') setStatus('done')
-        }
-      }
-      setStatus((s) => (s === 'running' ? 'done' : s))
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        if (pauseRef.current) setStatus('paused')
-        return
-      }
-      setLogs((prev) => [...prev, e.message])
-      setStatus('failed')
+      setLivePreview((p) => (p && p.rowIndex === index && !p.html ? { ...p, html: res.html } : p))
+    } catch {
+      previewFetchRef.current.delete(index)
     }
   }, [])
 
+  /** Fold one pipeline event into local state. Shared by live and replayed feeds. */
+  const applyEvent = (evt: any) => {
+    if (!evt || typeof evt !== 'object') return
+    switch (evt.type) {
+      case 'log':
+        setLogs((prev) => [...prev, evt.message || String(evt)])
+        break
+      case 'run_meta':
+        if (evt.sender_email) setRunSender(evt.sender_email)
+        break
+      case 'run_status':
+        setStatus(runStatusToLocal(evt.status))
+        break
+      case 'status_update':
+        setLeadStatus(evt.row_index, evt.status)
+        setCurrentIndex(evt.row_index)
+        break
+      case 'lead_resolved':
+        setLeads((prev) => {
+          const next = prev.map((l, i) =>
+            i === evt.row_index
+              ? { ...l, website: evt.website || l.website, company: evt.company || l.company }
+              : l,
+          )
+          leadsRef.current = next
+          return next
+        })
+        break
+      case 'stage':
+        pushStage(evt.row_index, {
+          stage: evt.stage,
+          label: evt.label,
+          state: evt.state || 'active',
+        })
+        setCurrentIndex(evt.row_index)
+        break
+      case 'preview_html': {
+        // A replayed preview carries no HTML (the snapshot holds the body), so
+        // fall back to whatever the lead already has rather than blanking it.
+        const existing = leadsRef.current[evt.row_index] || {}
+        const html = evt.html || existing._preview_html || ''
+        if (!html && evt.html_in_snapshot) void loadLeadPreview(evt.row_index)
+        const preview: LivePreview = {
+          rowIndex: evt.row_index,
+          html,
+          subject: evt.subject || 'Starlight outreach',
+          company: evt.company,
+          website: evt.website,
+          to: evt.to,
+          from: evt.from,
+          productCount: evt.product_count,
+          productSheet: evt.product_sheet,
+        }
+        setLivePreview(preview)
+        setCurrentIndex(evt.row_index)
+        setLeads((prev) => {
+          const next = prev.map((l, i) =>
+            i === evt.row_index
+              ? {
+                  ...l,
+                  _preview_html: preview.html,
+                  _subject: preview.subject,
+                  _product_sheet: preview.productSheet,
+                  _product_count: preview.productCount,
+                }
+              : l,
+          )
+          leadsRef.current = next
+          return next
+        })
+        break
+      }
+      case 'done':
+        setStatus('done')
+        break
+      default:
+        break
+    }
+  }
+
+  /**
+   * Tail a run's event feed, reconnecting on its own.
+   *
+   * The cursor is what makes the run tab-independent: every reconnect asks for
+   * the events after the last one seen, so nothing is replayed twice and
+   * nothing is missed while the tab was closed, asleep or offline.
+   */
+  const followRun = useCallback(async (id: string, fromCursor: number) => {
+    streamAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    streamAbortRef.current = ctrl
+    cursorRef.current = fromCursor
+    const token = localStorage.getItem('token')
+
+    for (let attempt = 0; !ctrl.signal.aborted; attempt += 1) {
+      let sawEvents = false
+      try {
+        const res = await fetch(
+          `${getApiBase()}/api/campaign/runs/${id}/stream?cursor=${cursorRef.current}`,
+          {
+            headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            signal: ctrl.signal,
+          },
+        )
+        if (!res.ok || !res.body) throw new Error(await res.text())
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let finished = false
+
+        while (!finished) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const chunks = buffer.split('\n\n')
+          buffer = chunks.pop() || ''
+          for (const chunk of chunks) {
+            const line = chunk.split('\n').find((l) => l.startsWith('data:'))
+            if (!line) continue
+            let evt: any
+            try {
+              evt = JSON.parse(line.slice(5).trim())
+            } catch {
+              continue
+            }
+            sawEvents = true
+            if (typeof evt._cursor === 'number') cursorRef.current = evt._cursor
+            if (evt.type === 'run_closed') {
+              setStatus(runStatusToLocal(evt.status))
+              finished = true
+              break
+            }
+            applyEvent(evt)
+          }
+        }
+        if (finished) return
+      } catch (e: any) {
+        if (ctrl.signal.aborted || e?.name === 'AbortError') return
+        setLogs((prev) => [
+          ...prev,
+          `Live feed dropped (${e?.message || e}) — the run keeps going, reconnecting…`,
+        ])
+      }
+      if (ctrl.signal.aborted) return
+      const backoff = sawEvents ? 500 : Math.min(10000, 1000 * (attempt + 1))
+      await new Promise((r) => setTimeout(r, backoff))
+    }
+  }, [])
+
+  /** Load a run's full state, then follow it if it is still going. */
+  const attachRun = useCallback(
+    async (id: string) => {
+      setAttaching(true)
+      try {
+        const snap = await api.campaignRun(id)
+        const runLeads = snap.leads.map((l) => ({ ...l }))
+        leadsRef.current = runLeads
+        setLeads(runLeads)
+        setLogs(snap.logs || [])
+        setFileName(snap.run.file_name || '')
+        setRunSender(snap.run.sender_email || '')
+        setRunId(snap.run.id)
+        runIdRef.current = snap.run.id
+        previewFetchRef.current = new Set()
+        setRunRecord(snap.run)
+        setStatus(runStatusToLocal(snap.run.status))
+        setAutosend(true)
+        setFinishedRun(null)
+
+        const opts = snap.run.options || {}
+        if (opts.template) setTemplate(opts.template)
+        if (typeof opts.delay === 'number') setDelay(opts.delay)
+        if (opts.recipient_override) setRecipientOverride(opts.recipient_override)
+        if (typeof opts.attach_product_sheet === 'boolean') {
+          setAttachProductSheet(opts.attach_product_sheet)
+        }
+
+        const stages: Record<number, StageEvent[]> = {}
+        runLeads.forEach((l, i) => {
+          if (Array.isArray(l._stages) && l._stages.length) stages[i] = l._stages
+        })
+        setStagesByLead(stages)
+
+        let previewIdx = -1
+        for (let i = runLeads.length - 1; i >= 0; i -= 1) {
+          if (runLeads[i]._preview_html) {
+            previewIdx = i
+            break
+          }
+        }
+        if (previewIdx >= 0) {
+          const l = runLeads[previewIdx]
+          setLivePreview({
+            rowIndex: previewIdx,
+            html: l._preview_html,
+            subject: l._subject || 'Starlight outreach',
+            company: l.company,
+            website: l.website,
+            to: l._to,
+            from: snap.run.sender_email,
+            productCount: l._product_count,
+            productSheet: l._product_sheet,
+          })
+          setCurrentIndex(previewIdx)
+        }
+
+        cursorRef.current = snap.cursor
+        try {
+          localStorage.setItem(RUN_STORAGE_KEY, snap.run.id)
+        } catch {
+          /* private mode — the server still knows about the run */
+        }
+        if (snap.run.status === 'running') void followRun(snap.run.id, snap.cursor)
+        return snap.run
+      } finally {
+        setAttaching(false)
+      }
+    },
+    [followRun],
+  )
+
+  /** Hand the campaign to the server and start watching it. */
+  const startRun = useCallback(async () => {
+    const opts = optsRef.current
+    setStatus('running')
+    setLogs([])
+    setDraft(null)
+    setLivePreview(null)
+    setStagesByLead({})
+    setFinishedRun(null)
+    pauseRef.current = false
+    stopReviewRef.current = false
+    setLeads((prev) => {
+      const next = prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' }))
+      leadsRef.current = next
+      return next
+    })
+
+    try {
+      const res = await api.createCampaignRun({
+        leads: leadsRef.current,
+        template: opts.template,
+        delay: opts.delay,
+        sender_email: opts.senderEmail,
+        recipient_override: opts.recipientOverride,
+        attach_product_sheet: opts.attachProductSheet,
+        file_name: fileName,
+      })
+      setRunId(res.run_id)
+      runIdRef.current = res.run_id
+      previewFetchRef.current = new Set()
+      cursorRef.current = 0
+      try {
+        localStorage.setItem(RUN_STORAGE_KEY, res.run_id)
+      } catch {
+        /* ignore */
+      }
+      setLogs((prev) => [
+        ...prev,
+        'Campaign started on the server — you can close this tab and it keeps sending.',
+      ])
+      void followRun(res.run_id, 0)
+    } catch (e: any) {
+      setLogs((prev) => [...prev, e?.message || 'Could not start the campaign'])
+      setStatus('failed')
+    }
+  }, [followRun, fileName])
+
   const start = useCallback(async (): Promise<'live' | 'review'> => {
     if (optsRef.current.autosend) {
-      void startAutosend()
+      await startRun()
       return 'live'
     }
     void startReview()
     return 'review'
-  }, [startAutosend, startReview])
+  }, [startRun, startReview])
 
   const resume = useCallback(async () => {
     pauseRef.current = false
     stopReviewRef.current = false
-    if (optsRef.current.autosend) {
-      void startAutosend(true)
+    const id = runIdRef.current
+    if (id) {
+      // The server owns the queue, so resuming is just asking it to carry on
+      // from the first lead that was never sent.
+      setStatus('running')
+      try {
+        const res = await api.resumeCampaignRun(id)
+        if (res.message) setLogs((prev) => [...prev, res.message as string])
+        setStatus(runStatusToLocal(res.status))
+        if (res.status === 'running') void followRun(id, cursorRef.current)
+      } catch (e: any) {
+        setLogs((prev) => [...prev, e?.message || 'Could not resume the campaign'])
+        setStatus('paused')
+      }
       return
     }
     setStatus('reviewing')
     const jobs = remainingGenerateJobs()
     await runGenerateQueue(jobs)
     reviewSettled()
-  }, [startAutosend, generateAt])
+  }, [followRun, generateAt])
 
   const sendLead = useCallback(async (index: number) => {
     const d = draftsRef.current[index]
@@ -1100,6 +1365,48 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // A tab that opens (or reopens) rejoins whatever the server is still doing.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const { run } = await api.activeCampaignRun()
+        if (cancelled) return
+        if (run) {
+          await attachRun(run.id)
+          return
+        }
+        let stored: string | null = null
+        try {
+          stored = localStorage.getItem(RUN_STORAGE_KEY)
+        } catch {
+          stored = null
+        }
+        if (!stored) return
+        const snap = await api.campaignRun(stored).catch(() => null)
+        if (cancelled) return
+        if (!snap) {
+          try {
+            localStorage.removeItem(RUN_STORAGE_KEY)
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+        // It finished while this tab was gone — surface it, don't take over.
+        setFinishedRun(snap.run)
+      } catch {
+        /* no active run, or the API is unreachable — setup still works */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [attachRun])
+
+  // Stop tailing when the provider unmounts; the run itself carries on.
+  useEffect(() => () => streamAbortRef.current?.abort(), [])
+
   const counts = useMemo(() => {
     let sent = 0
     let failed = 0
@@ -1156,6 +1463,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     stagesByLead,
     draftsByLead,
     runSender,
+    runId,
+    runRecord,
+    attaching,
+    finishedRun,
     counts,
     setTemplate,
     setDelay,
@@ -1184,6 +1495,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     applyBulkEdit,
     removeBulkEdit,
     clearBulkEdits,
+    attachRun,
+    dismissFinishedRun,
+    loadLeadPreview,
     bulkEdits,
     bulkRevising,
     bulkReviseProgress,

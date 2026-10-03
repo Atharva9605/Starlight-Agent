@@ -74,6 +74,49 @@ export type PublicCatalogue = {
   products: LibraryProduct[]
 }
 
+export type CampaignRunStatus = 'running' | 'paused' | 'done' | 'stopped' | 'failed'
+
+export type CampaignRunCounts = {
+  total: number
+  sent: number
+  failed: number
+  skipped: number
+  processed: number
+  pending: number
+  /** Leads a resume would still work through: never reached plus failed. */
+  retriable: number
+}
+
+export type CampaignRun = {
+  id: string
+  status: CampaignRunStatus
+  control: 'run' | 'pause' | 'stop'
+  file_name: string
+  sender_email: string
+  created_by_email: string
+  total: number
+  error: string
+  options: {
+    template?: string
+    delay?: number
+    sender_email?: string
+    recipient_override?: string
+    attach_product_sheet?: boolean
+  }
+  counts: CampaignRunCounts
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+/** A run plus every lead's latest state — enough to render it with no replay. */
+export type CampaignRunSnapshot = {
+  run: CampaignRun
+  leads: Record<string, any>[]
+  logs: string[]
+  cursor: number
+}
+
 export type OrgMember = {
   id: string
   email: string
@@ -342,6 +385,40 @@ export const api = {
     ),
   campaignDiscard: (draftId: string) =>
     request(`/api/campaign/drafts/${draftId}`, { method: 'DELETE' }),
+
+  // Durable runs — these keep sending after the tab is closed.
+  createCampaignRun: (body: {
+    leads: Record<string, any>[]
+    template: string
+    delay: number
+    sender_email?: string
+    recipient_override?: string
+    attach_product_sheet?: boolean
+    file_name?: string
+  }) =>
+    request<{ run_id: string; status: string }>('/api/campaign/runs', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  campaignRuns: (status?: CampaignRunStatus | 'active') =>
+    request<{ runs: CampaignRun[] }>(
+      `/api/campaign/runs${status ? `?status=${status}` : ''}`,
+    ),
+  activeCampaignRun: () => request<{ run: CampaignRun | null }>('/api/campaign/runs/active'),
+  campaignRun: (runId: string) => request<CampaignRunSnapshot>(`/api/campaign/runs/${runId}`),
+  campaignRunLeadHtml: (runId: string, rowIndex: number) =>
+    request<{ html: string }>(`/api/campaign/runs/${runId}/leads/${rowIndex}/html`),
+  pauseCampaignRun: (runId: string) =>
+    request<{ status: string }>(`/api/campaign/runs/${runId}/pause`, { method: 'POST' }),
+  resumeCampaignRun: (runId: string) =>
+    request<{ status: string; message?: string }>(`/api/campaign/runs/${runId}/resume`, {
+      method: 'POST',
+    }),
+  stopCampaignRun: (runId: string) =>
+    request<{ status: string }>(`/api/campaign/runs/${runId}/stop`, { method: 'POST' }),
+  deleteCampaignRun: (runId: string) =>
+    request(`/api/campaign/runs/${runId}`, { method: 'DELETE' }),
+
   aiEvents: () => request<{ events: any[] }>('/api/ai/events'),
   orgMembers: () =>
     request<{ members: OrgMember[]; count: number }>('/api/org/members'),

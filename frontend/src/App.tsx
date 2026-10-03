@@ -11,6 +11,8 @@ import { ThreadPage } from './pages/ThreadPage'
 import { CampaignSetupPage } from './pages/campaigns/CampaignSetupPage'
 import { CampaignLivePage } from './pages/campaigns/CampaignLivePage'
 import { CampaignReviewPage } from './pages/campaigns/CampaignReviewPage'
+import { CampaignRunsPage } from './pages/campaigns/CampaignRunsPage'
+import { CampaignRunPage } from './pages/campaigns/CampaignRunPage'
 import { CataloguesPage } from './pages/CataloguesPage'
 import { PublicCataloguePage } from './pages/PublicCataloguePage'
 import { PromptsPage } from './pages/PromptsPage'
@@ -56,6 +58,8 @@ export default function App() {
               <Route path="campaigns" element={<CampaignSetupPage />} />
               <Route path="campaigns/review" element={<CampaignReviewPage />} />
               <Route path="campaigns/live" element={<CampaignLivePage />} />
+              <Route path="campaigns/runs" element={<CampaignRunsPage />} />
+              <Route path="campaigns/runs/:id" element={<CampaignRunPage />} />
               <Route path="campaigns/new/*" element={<Navigate to="/campaigns" replace />} />
               <Route path="catalogues" element={<CataloguesPage />} />
               <Route path="knowledge" element={<Navigate to="/catalogues" replace />} />

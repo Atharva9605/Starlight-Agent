@@ -136,6 +136,9 @@ def init_db() -> None:
         from conversation_store import init_conversation_tables
         init_conversation_tables()
 
+        from campaign_runs import init_campaign_run_tables
+        init_campaign_run_tables()
+
         from org_store import run_saas_migrations
         run_saas_migrations()
     finally:

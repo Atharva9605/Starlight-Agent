@@ -89,6 +89,9 @@ export function CampaignLivePage() {
     skipCurrent,
     reviseCurrent,
     autosend,
+    runId,
+    attaching,
+    loadLeadPreview,
   } = useCampaign()
 
   const [input, setInput] = useState('')
@@ -103,18 +106,6 @@ export function CampaignLivePage() {
     setFocusOverride(null)
   }, [draft?.rowIndex, livePreview?.rowIndex, currentIndex, status])
 
-  if (!leads.length) return <Navigate to="/campaigns" replace />
-  if (status === 'reviewing' || (status === 'paused' && !autosend)) {
-    return <Navigate to="/campaigns/review" replace />
-  }
-
-  const running = status === 'running'
-  const paused = status === 'paused'
-  const activeRun = running || generating
-  const pct = counts.progressPct
-  const busy = generating || revising || sending
-  const left = Math.max(0, counts.total - counts.processed)
-
   const activeIdx = leads.findIndex((l) => {
     const s = leadState(l)
     return s === 'processing' || s === 'pending' || s === 'ready'
@@ -128,6 +119,39 @@ export function CampaignLivePage() {
       : currentIndex >= 0
         ? currentIndex
         : Math.max(0, counts.processed - 1))
+
+  // Email bodies live in the run record, not in state — fetch the one on screen.
+  useEffect(() => {
+    const lead = leads[focusIdx]
+    if (runId && lead && !lead._preview_html && lead._has_preview) {
+      void loadLeadPreview(focusIdx)
+    }
+  }, [focusIdx, leads, runId, loadLeadPreview])
+
+  if (attaching) {
+    return (
+      <div className="dash-screen">
+        <div className="panel stack">
+          <strong style={{ fontFamily: 'var(--display)' }}>Rejoining your campaign…</strong>
+          <p className="muted">
+            It has been running on the server this whole time. Picking up where it is now.
+          </p>
+        </div>
+      </div>
+    )
+  }
+  if (!leads.length) return <Navigate to="/campaigns" replace />
+  if (status === 'reviewing' || (status === 'paused' && !autosend)) {
+    return <Navigate to="/campaigns/review" replace />
+  }
+
+  const running = status === 'running'
+  const paused = status === 'paused'
+  const activeRun = running || generating
+  const pct = counts.progressPct
+  const busy = generating || revising || sending
+  const left = Math.max(0, counts.total - counts.processed)
+
   const focus = leads[focusIdx]
   const focusState = focus ? leadState(focus) : 'pending'
   const includeDiscover = leadNeedsDiscover(focus, stagesByLead[focusIdx])
@@ -150,6 +174,10 @@ export function CampaignLivePage() {
     setInput('')
     await reviseCurrent(msg)
   }
+
+  const finished = status === 'done' || status === 'stopped' || status === 'failed'
+  // A resume picks up the untouched leads and retries the failures.
+  const retriable = left + counts.failed
 
   const headline = (() => {
     if (running || generating) return `Working lead ${focusIdx + 1} of ${counts.total}`
@@ -176,6 +204,11 @@ export function CampaignLivePage() {
             {left ? ` · ${left} left` : ''}
             {draft?.to ? ` · to ${draft.to}` : runSender ? ` · from ${runSender}` : ''}
           </p>
+          {runId && activeRun ? (
+            <p className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+              Running on the server — you can close this tab and it keeps sending.
+            </p>
+          ) : null}
         </div>
         <div className="row">
           {paused ? (
@@ -208,13 +241,50 @@ export function CampaignLivePage() {
               >
                 New campaign
               </button>
-              <Link to="/inbox" className="btn">
-                Inbox
-              </Link>
+              {runId && finished ? (
+                <Link to={`/campaigns/runs/${runId}`} className="btn">
+                  See the whole run
+                </Link>
+              ) : (
+                <Link to="/inbox" className="btn">
+                  Inbox
+                </Link>
+              )}
             </>
           )}
         </div>
       </header>
+
+      {runId && finished ? (
+        <div className="panel stack">
+          <strong style={{ fontFamily: 'var(--display)' }}>
+            {status === 'done'
+              ? `Campaign finished — ${counts.sent} email${counts.sent === 1 ? '' : 's'} sent`
+              : status === 'stopped'
+                ? 'Campaign stopped'
+                : 'Campaign failed'}
+          </strong>
+          <p className="muted" style={{ margin: 0 }}>
+            The full record is kept: every lead, the email it received, and the activity log.
+            {retriable
+              ? ` ${retriable} lead${retriable === 1 ? '' : 's'} were not sent — you can resume them.`
+              : ''}
+          </p>
+          <div className="row" style={{ gap: 8 }}>
+            <Link to={`/campaigns/runs/${runId}`} className="btn">
+              See the whole run
+            </Link>
+            {retriable ? (
+              <button className="btn secondary" type="button" onClick={() => void resume()}>
+                Resume the {retriable} left
+              </button>
+            ) : null}
+            <Link to="/campaigns/runs" className="btn secondary">
+              All runs
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
       <div className="dash-progress panel">
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10, gap: 12 }}>
