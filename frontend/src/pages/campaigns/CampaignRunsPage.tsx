@@ -4,6 +4,7 @@ import { api, type CampaignRun } from '../../api/client'
 import { useCampaign } from '../../campaign/CampaignContext'
 
 const STATUS_PILL: Record<string, string> = {
+  scheduled: 'discover',
   running: 'warn',
   paused: 'warn',
   done: 'ok',
@@ -67,6 +68,31 @@ export function CampaignRunsPage() {
     }
   }
 
+  const startNow = async (run: CampaignRun) => {
+    setBusyId(run.id)
+    try {
+      await api.resumeCampaignRun(run.id)
+      await attachRun(run.id)
+      nav('/campaigns/live')
+    } catch (e: any) {
+      setError(e?.message || 'Could not start that run')
+    } finally {
+      setBusyId('')
+    }
+  }
+
+  const cancel = async (run: CampaignRun) => {
+    setBusyId(run.id)
+    try {
+      await api.stopCampaignRun(run.id)
+      await load()
+    } catch (e: any) {
+      setError(e?.message || 'Could not cancel that run')
+    } finally {
+      setBusyId('')
+    }
+  }
+
   const remove = async (run: CampaignRun) => {
     setBusyId(run.id)
     try {
@@ -106,6 +132,7 @@ export function CampaignRunsPage() {
           <div className="queue">
             {runs.map((run) => {
               const live = run.status === 'running' || run.status === 'paused'
+              const scheduled = run.status === 'scheduled'
               return (
                 <div key={run.id} className="queue-row">
                   <span className={`queue-index ${run.status === 'done' ? 'sent' : run.status}`}>
@@ -114,8 +141,10 @@ export function CampaignRunsPage() {
                   <span className="queue-name">
                     {runLabel(run)}
                     <span className="muted" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
-                      {formatWhen(run.created_at)} · {run.counts.sent} sent · {run.counts.failed} failed
-                      {run.counts.pending ? ` · ${run.counts.pending} left` : ''}
+                      {scheduled
+                        ? `Sends ${formatWhen(run.scheduled_at)} · ${run.total} lead${run.total === 1 ? '' : 's'}`
+                        : `${formatWhen(run.created_at)} · ${run.counts.sent} sent · ${run.counts.failed} failed`}
+                      {!scheduled && run.counts.pending ? ` · ${run.counts.pending} left` : ''}
                       {run.sender_email ? ` · from ${run.sender_email}` : ''}
                     </span>
                   </span>
@@ -123,7 +152,26 @@ export function CampaignRunsPage() {
                     {run.status === 'running' ? 'Sending' : run.status}
                   </span>
                   <span className="row" style={{ gap: 6 }}>
-                    {live ? (
+                    {scheduled ? (
+                      <>
+                        <button
+                          className="btn"
+                          type="button"
+                          disabled={busyId === run.id}
+                          onClick={() => void startNow(run)}
+                        >
+                          Start now
+                        </button>
+                        <button
+                          className="btn secondary"
+                          type="button"
+                          disabled={busyId === run.id}
+                          onClick={() => void cancel(run)}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : live ? (
                       <button
                         className="btn"
                         type="button"
@@ -137,7 +185,7 @@ export function CampaignRunsPage() {
                         View full run
                       </Link>
                     )}
-                    {!live ? (
+                    {!live && !scheduled ? (
                       <button
                         className="btn secondary"
                         type="button"

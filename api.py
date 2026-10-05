@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import asyncio
 import re
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -78,6 +79,9 @@ from config_manager import (
 
 app = FastAPI(title="Starlight AI-CRM Mailer API")
 
+CAMPAIGN_SCHEDULE_POLL_SECONDS = 20
+CAMPAIGN_SCHEDULE_MAX_DAYS = 90
+
 _cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -105,6 +109,19 @@ async def startup():
     except Exception as e:
         print(f"Could not resume in-flight campaign runs: {e}")
     asyncio.create_task(gmail_sync_loop())
+    asyncio.create_task(campaign_schedule_loop())
+
+
+async def campaign_schedule_loop() -> None:
+    """Start scheduled campaign runs once their time arrives."""
+    while True:
+        try:
+            started = await asyncio.to_thread(campaign_runs.start_due_scheduled_runs)
+            if started:
+                print(f"Started {started} scheduled campaign run(s)")
+        except Exception as e:
+            print(f"Scheduled campaign check failed: {e}")
+        await asyncio.sleep(CAMPAIGN_SCHEDULE_POLL_SECONDS)
 
 # Legacy CORS block removed — configured above
 
@@ -1647,6 +1664,31 @@ class CampaignRunRequest(BaseModel):
     delay: int = 3
     attach_product_sheet: bool = True
     file_name: str = ""
+    # ISO-8601 instant; when set the run waits until then instead of starting now.
+    scheduled_at: Optional[str] = None
+
+
+def _parse_scheduled_at(value: Optional[str]) -> Optional[datetime]:
+    if not value or not str(value).strip():
+        return None
+    raw = str(value).strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        when = datetime.fromisoformat(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="scheduled_at must be an ISO date-time")
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if when <= now - timedelta(minutes=1):
+        raise HTTPException(status_code=400, detail="Scheduled time is in the past")
+    if when > now + timedelta(days=CAMPAIGN_SCHEDULE_MAX_DAYS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Schedule at most {CAMPAIGN_SCHEDULE_MAX_DAYS} days ahead",
+        )
+    return when
 
 
 def _require_runs_db() -> None:
@@ -1676,6 +1718,7 @@ async def create_campaign_run(req: CampaignRunRequest):
     _require_runs_db()
     if not req.leads:
         raise HTTPException(status_code=400, detail="No leads to send")
+    scheduled_at = _parse_scheduled_at(req.scheduled_at)
 
     ctx = get_tenant_context()
     run_id = await asyncio.to_thread(
@@ -1693,7 +1736,15 @@ async def create_campaign_run(req: CampaignRunRequest):
         file_name=req.file_name,
         created_by=ctx.user_id,
         created_by_email=ctx.email,
+        scheduled_at=scheduled_at,
     )
+    if scheduled_at:
+        await asyncio.to_thread(
+            campaign_runs.append_event,
+            run_id,
+            {"type": "log", "message": f"Campaign scheduled for {scheduled_at.isoformat()}."},
+        )
+        return {"run_id": run_id, "status": "scheduled", "scheduled_at": scheduled_at.isoformat()}
     started = await asyncio.to_thread(campaign_runs.start_worker, run_id, ctx)
     if not started:
         raise HTTPException(status_code=409, detail="Could not start the campaign worker")
@@ -1808,6 +1859,16 @@ async def stop_campaign_run(run_id: str):
     _require_runs_db()
     run = _run_or_404(run_id)
     org_id = get_organization_id()
+    if run["status"] == campaign_runs.SCHEDULED_STATUS:
+        cancelled = await asyncio.to_thread(campaign_runs.cancel_scheduled_run, run_id, org_id)
+        if cancelled:
+            await asyncio.to_thread(
+                campaign_runs.append_event,
+                run_id,
+                {"type": "log", "message": "Scheduled campaign cancelled."},
+            )
+            return {"status": "stopped"}
+        run = _run_or_404(run_id)
     await asyncio.to_thread(campaign_runs.set_control, run_id, "stop", org_id)
     if run["status"] != "running":
         # No worker to notice the signal — close the run out here.

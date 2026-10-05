@@ -123,6 +123,9 @@ export function CampaignRunPage() {
             {run.counts.pending ? ` · ${run.counts.pending} never sent` : ''}
             {run.sender_email ? ` · from ${run.sender_email}` : ''}
           </p>
+          {run.status === 'scheduled' ? (
+            <p className="muted">Scheduled to start {formatWhen(run.scheduled_at)}</p>
+          ) : null}
           {run.error ? <p className="muted">Run error: {run.error}</p> : null}
         </div>
         <div className="row">
@@ -132,7 +135,13 @@ export function CampaignRunPage() {
             </button>
           ) : canResume ? (
             <button className="btn" type="button" disabled={busy} onClick={() => void resume()}>
-              {busy ? 'Resuming…' : `Resume ${run.counts.retriable} left`}
+              {busy
+                ? run.status === 'scheduled'
+                  ? 'Starting…'
+                  : 'Resuming…'
+                : run.status === 'scheduled'
+                  ? 'Start now'
+                  : `Resume ${run.counts.retriable} left`}
             </button>
           ) : null}
           <Link to="/campaigns/runs" className="btn secondary">

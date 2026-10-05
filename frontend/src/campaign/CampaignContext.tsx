@@ -193,6 +193,8 @@ type CampaignValue = {
   removeLead: (index: number) => void
   clearLeads: () => void
   start: () => Promise<'live' | 'review'>
+  /** Queue an autosend run on the server for a later time, then clear setup. */
+  schedule: (at: Date) => Promise<void>
   stop: () => void
   pause: () => void
   resume: () => Promise<void>
@@ -1094,6 +1096,21 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     return 'review'
   }, [startRun, startReview])
 
+  const schedule = useCallback(async (at: Date) => {
+    const opts = optsRef.current
+    await api.createCampaignRun({
+      leads: leadsRef.current.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })),
+      template: opts.template,
+      delay: opts.delay,
+      sender_email: opts.senderEmail,
+      recipient_override: opts.recipientOverride,
+      attach_product_sheet: opts.attachProductSheet,
+      file_name: fileName,
+      scheduled_at: at.toISOString(),
+    })
+    clearLeads()
+  }, [fileName, clearLeads])
+
   const resume = useCallback(async () => {
     pauseRef.current = false
     stopReviewRef.current = false
@@ -1478,6 +1495,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     removeLead,
     clearLeads,
     start,
+    schedule,
     stop,
     pause,
     resume,

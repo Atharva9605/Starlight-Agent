@@ -74,7 +74,7 @@ export type PublicCatalogue = {
   products: LibraryProduct[]
 }
 
-export type CampaignRunStatus = 'running' | 'paused' | 'done' | 'stopped' | 'failed'
+export type CampaignRunStatus = 'scheduled' | 'running' | 'paused' | 'done' | 'stopped' | 'failed'
 
 export type CampaignRunCounts = {
   total: number
@@ -107,6 +107,7 @@ export type CampaignRun = {
   created_at: string
   updated_at: string
   finished_at: string | null
+  scheduled_at: string | null
 }
 
 /** A run plus every lead's latest state — enough to render it with no replay. */
@@ -395,8 +396,10 @@ export const api = {
     recipient_override?: string
     attach_product_sheet?: boolean
     file_name?: string
+    /** ISO instant; the run waits on the server until then. */
+    scheduled_at?: string
   }) =>
-    request<{ run_id: string; status: string }>('/api/campaign/runs', {
+    request<{ run_id: string; status: string; scheduled_at?: string }>('/api/campaign/runs', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

@@ -29,8 +29,10 @@ from vector_store import _pg_conn, use_postgres
 log = logging.getLogger("campaign_runs")
 
 # Statuses a run can hold. 'running' means a worker should be alive for it.
+# 'scheduled' runs wait for scheduled_at, then the scheduler loop starts them.
 ACTIVE_STATUSES = ("running", "paused")
 TERMINAL_STATUSES = ("done", "stopped", "failed")
+SCHEDULED_STATUS = "scheduled"
 
 # A run whose heartbeat is older than this is considered orphaned (API restart)
 # and may be adopted by another worker.
@@ -103,8 +105,15 @@ def init_campaign_run_tables() -> None:
                 """
             )
             cur.execute(
+                "ALTER TABLE campaign_runs ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ"
+            )
+            cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_campaign_runs_org "
                 "ON campaign_runs (organization_id, created_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_campaign_runs_scheduled "
+                "ON campaign_runs (scheduled_at) WHERE status = 'scheduled'"
             )
             cur.execute(
                 """
@@ -181,9 +190,11 @@ def create_run(
     file_name: str = "",
     created_by: str = "",
     created_by_email: str = "",
+    scheduled_at: Optional[datetime] = None,
 ) -> str:
     _require_postgres()
     run_id = str(uuid.uuid4())
+    status = SCHEDULED_STATUS if scheduled_at else "running"
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -191,8 +202,8 @@ def create_run(
                 """
                 INSERT INTO campaign_runs
                     (id, organization_id, created_by, created_by_email, file_name,
-                     status, control, options, sender_email, total)
-                VALUES (%s, %s, %s, %s, %s, 'running', 'run', %s, %s, %s)
+                     status, control, options, sender_email, total, scheduled_at)
+                VALUES (%s, %s, %s, %s, %s, %s, 'run', %s, %s, %s, %s)
                 """,
                 (
                     run_id,
@@ -200,9 +211,11 @@ def create_run(
                     created_by,
                     created_by_email,
                     file_name,
+                    status,
                     json.dumps(options or {}),
                     str(options.get("sender_email") or ""),
                     len(leads),
+                    scheduled_at,
                 ),
             )
             for idx, lead in enumerate(leads):
@@ -230,7 +243,7 @@ def create_run(
 _RUN_COLUMNS = """
     r.id, r.organization_id, r.created_by, r.created_by_email, r.file_name,
     r.status, r.control, r.options, r.sender_email, r.total, r.error,
-    r.created_at, r.updated_at, r.finished_at, r.heartbeat_at
+    r.created_at, r.updated_at, r.finished_at, r.heartbeat_at, r.scheduled_at
 """
 
 
@@ -259,6 +272,7 @@ def _run_row_to_dict(row: tuple, counts: dict[str, int]) -> dict[str, Any]:
         "updated_at": _iso(row[12]),
         "finished_at": _iso(row[13]),
         "heartbeat_at": _iso(row[14]),
+        "scheduled_at": _iso(row[15]),
         "counts": {
             "total": total,
             "sent": sent,
@@ -500,6 +514,28 @@ def set_control(run_id: str, control: str, organization_id: Optional[str] = None
                 sql += " AND organization_id = %s"
                 params.append(organization_id)
             cur.execute(sql, params)
+            ok = cur.rowcount > 0
+        conn.commit()
+        return ok
+    finally:
+        conn.close()
+
+
+def cancel_scheduled_run(run_id: str, organization_id: str) -> bool:
+    """Stop a run that has not started yet. False if it already started (or is not scheduled)."""
+    if not use_postgres():
+        return False
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE campaign_runs
+                SET status = 'stopped', control = 'stop', updated_at = NOW(), finished_at = NOW()
+                WHERE id = %s AND organization_id = %s AND status = %s
+                """,
+                (run_id, organization_id, SCHEDULED_STATUS),
+            )
             ok = cur.rowcount > 0
         conn.commit()
         return ok
@@ -896,3 +932,46 @@ def adopt_orphaned_runs() -> int:
         except Exception:  # noqa: BLE001
             log.exception("Could not adopt campaign run %s", run_id)
     return adopted
+
+
+def due_scheduled_run_ids() -> list[tuple[str, str, str, str]]:
+    """Scheduled runs whose time has come: (run_id, org_id, user_id, user_email)."""
+    if not use_postgres():
+        return []
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, organization_id, created_by, created_by_email
+                FROM campaign_runs
+                WHERE status = %s AND scheduled_at <= NOW()
+                ORDER BY scheduled_at
+                """,
+                (SCHEDULED_STATUS,),
+            )
+            return [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def start_due_scheduled_runs() -> int:
+    """Hand every due scheduled run to a worker. claim_run keeps this multi-process safe."""
+    if not use_postgres():
+        return 0
+    started = 0
+    for run_id, org_id, user_id, user_email in due_scheduled_run_ids():
+        ctx = TenantContext(
+            user_id=user_id or "system",
+            organization_id=org_id,
+            role="owner",
+            email=user_email or "",
+        )
+        try:
+            if start_worker(run_id, ctx):
+                started += 1
+                append_event(run_id, {"type": "log", "message": "Scheduled time reached — campaign started."})
+                log.info("Started scheduled campaign run %s", run_id)
+        except Exception:  # noqa: BLE001
+            log.exception("Could not start scheduled campaign run %s", run_id)
+    return started

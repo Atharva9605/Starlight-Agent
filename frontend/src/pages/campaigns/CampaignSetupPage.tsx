@@ -12,6 +12,18 @@ const SWATCHES: Record<string, string[]> = {
   'email_template_bold.html': ['#f59e0b', '#e11d48'],
 }
 
+/** `<input type="datetime-local">` wants local wall-clock time without a zone. */
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function formatScheduled(value: string): string {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 function toOption(t: { name: string; label: string; is_custom?: boolean }): TemplateOption {
   return {
     value: t.name,
@@ -41,6 +53,7 @@ export function CampaignSetupPage() {
     removeLead,
     clearLeads,
     start,
+    schedule,
     status,
     finishedRun,
     dismissFinishedRun,
@@ -50,6 +63,12 @@ export function CampaignSetupPage() {
   const [error, setError] = useState('')
   const [launching, setLaunching] = useState(false)
   const [templateOptions, setTemplateOptions] = useState<TemplateOption[]>(TEMPLATES)
+  const [scheduleLater, setScheduleLater] = useState(false)
+  const [scheduleAt, setScheduleAt] = useState('')
+  const [scheduleError, setScheduleError] = useState('')
+
+  const scheduleDate = scheduleAt ? new Date(scheduleAt) : null
+  const scheduleValid = Boolean(scheduleDate && !Number.isNaN(scheduleDate.getTime()) && scheduleDate.getTime() > Date.now())
 
   useEffect(() => {
     let cancelled = false
@@ -85,11 +104,37 @@ export function CampaignSetupPage() {
     }
   }
 
+  const toggleSchedule = (on: boolean) => {
+    setScheduleLater(on)
+    setScheduleError('')
+    if (!on) return
+    setAutosend(true)
+    if (!scheduleAt) {
+      const inAnHour = new Date(Date.now() + 60 * 60 * 1000)
+      inAnHour.setSeconds(0, 0)
+      setScheduleAt(toLocalInput(inAnHour))
+    }
+  }
+
   const launch = async () => {
     setLaunching(true)
+    setScheduleError('')
     try {
+      if (scheduleLater) {
+        if (!scheduleDate || !scheduleValid) {
+          setScheduleError('Pick a date and time in the future.')
+          return
+        }
+        await schedule(scheduleDate)
+        setScheduleLater(false)
+        setScheduleAt('')
+        nav('/campaigns/runs')
+        return
+      }
       const dest = await start()
       nav(dest === 'live' ? '/campaigns/live' : '/campaigns/review')
+    } catch (e: any) {
+      setScheduleError(e?.message || (scheduleLater ? 'Could not schedule the campaign' : 'Could not start the campaign'))
     } finally {
       setLaunching(false)
     }
@@ -121,10 +166,16 @@ export function CampaignSetupPage() {
             <button
               className="btn"
               type="button"
-              disabled={!leads.length || launching}
+              disabled={!leads.length || launching || (scheduleLater && !scheduleValid)}
               onClick={launch}
             >
-              {launching ? 'Starting…' : 'Start campaign'}
+              {launching
+                ? scheduleLater
+                  ? 'Scheduling…'
+                  : 'Starting…'
+                : scheduleLater
+                  ? 'Schedule campaign'
+                  : 'Start campaign'}
             </button>
           )}
         </div>
@@ -261,7 +312,10 @@ export function CampaignSetupPage() {
               <input
                 type="checkbox"
                 checked={autosend}
-                onChange={(e) => setAutosend(e.target.checked)}
+                onChange={(e) => {
+                  setAutosend(e.target.checked)
+                  if (!e.target.checked) toggleSchedule(false)
+                }}
               />
               <span>
                 <strong>Autosend</strong>
@@ -270,6 +324,39 @@ export function CampaignSetupPage() {
                 </span>
               </span>
             </label>
+
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={scheduleLater}
+                onChange={(e) => toggleSchedule(e.target.checked)}
+              />
+              <span>
+                <strong>Schedule for later</strong>
+                <span className="muted" style={{ display: 'block', fontSize: 13 }}>
+                  Pick a date and time — the server starts the campaign then and autosends every lead.
+                  You can close the browser.
+                </span>
+              </span>
+            </label>
+
+            {scheduleLater ? (
+              <label className="field">
+                <span>Send at (your local time)</span>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  min={toLocalInput(new Date())}
+                  value={scheduleAt}
+                  onChange={(e) => {
+                    setScheduleAt(e.target.value)
+                    setScheduleError('')
+                  }}
+                />
+              </label>
+            ) : null}
+
+            {scheduleError ? <div className="alert danger" style={{ margin: 0 }}>{scheduleError}</div> : null}
 
             <label className="toggle-row">
               <input
@@ -288,6 +375,10 @@ export function CampaignSetupPage() {
             {!autosend ? (
               <div className="alert warn" style={{ margin: 0 }}>
                 All emails are generated together. Open the review board to send now, add to bulk send, or discard.
+              </div>
+            ) : scheduleLater ? (
+              <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
+                Scheduled campaigns show under <strong>Campaign Runs</strong> — start them early or cancel from there.
               </div>
             ) : (
               <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
@@ -329,14 +420,18 @@ export function CampaignSetupPage() {
               <button
                 className="btn"
                 type="button"
-                disabled={!leads.length || launching || inFlight}
+                disabled={!leads.length || launching || inFlight || (scheduleLater && !scheduleValid)}
                 onClick={launch}
               >
                 {launching
-                  ? 'Starting…'
-                  : autosend
-                    ? `Autosend ${leads.length}`
-                    : `Generate & review ${leads.length}`}
+                  ? scheduleLater
+                    ? 'Scheduling…'
+                    : 'Starting…'
+                  : scheduleLater
+                    ? `Schedule ${leads.length} for ${formatScheduled(scheduleAt)}`
+                    : autosend
+                      ? `Autosend ${leads.length}`
+                      : `Generate & review ${leads.length}`}
               </button>
             </div>
           ) : null}

@@ -1774,6 +1774,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .queue-index.queued { background: #fff7ed; color: #c2410c; }
 .queue-index.ready { background: #eff6ff; color: #1d4ed8; }
 .queue-index.skipped { background: #f1f5f9; color: #64748b; }
+.queue-index.scheduled { background: #eff6ff; color: #1d4ed8; }
 .queue-name {
   font-weight: 600;
   font-size: 14px;
