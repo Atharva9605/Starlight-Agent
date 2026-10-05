@@ -41,7 +41,8 @@ from website_discovery import ensure_lead_website, lead_search_name, clean_lead_
 from generator_v2 import generate_eml_from_record, query_rag_with_trace
 from template_generator import generate_template_html
 from send_eml_gsuite import send_email_gsuite, send_threaded_reply, check_gmail_health
-from vector_store import init_db, get_status, clear_all, use_postgres
+from vector_store import init_db, get_status, clear_all, use_postgres, reembed_stale_chunks
+from azure_client import active_provider, azure_manager
 import conversation_store as conv_store
 from conversation_agent import (
     generate_draft_for_conversation,
@@ -81,6 +82,8 @@ app = FastAPI(title="Starlight AI-CRM Mailer API")
 
 CAMPAIGN_SCHEDULE_POLL_SECONDS = 20
 CAMPAIGN_SCHEDULE_MAX_DAYS = 90
+# Leads drafted at once in a campaign run; sends stay one at a time.
+CAMPAIGN_CONCURRENCY = max(1, int(os.getenv("CAMPAIGN_CONCURRENCY", "3") or 3))
 
 _cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
@@ -110,6 +113,17 @@ async def startup():
         print(f"Could not resume in-flight campaign runs: {e}")
     asyncio.create_task(gmail_sync_loop())
     asyncio.create_task(campaign_schedule_loop())
+    asyncio.create_task(_reembed_catalogue_in_background())
+
+
+async def _reembed_catalogue_in_background() -> None:
+    """Bring catalogue vectors onto the active embedding model after a provider switch."""
+    try:
+        updated = await asyncio.to_thread(reembed_stale_chunks)
+        if updated:
+            print(f"Re-embedded {updated} catalogue chunk(s) for the active embedding model")
+    except Exception as e:
+        print(f"Catalogue re-embedding failed: {e}")
 
 
 async def campaign_schedule_loop() -> None:
@@ -807,6 +821,14 @@ async def get_kb():
     }
 
 
+@app.get("/api/llm-status")
+async def llm_status():
+    """Active AI provider and any keys/models parked after errors (keys shown by position only)."""
+    if active_provider() == "gemini":
+        return azure_manager.status()
+    return {"provider": "azure", "deployment": azure_manager.get_chat_deployment()}
+
+
 @app.get("/api/catalogues")
 async def list_org_catalogues():
     """Authenticated: structured catalogue library for the current org."""
@@ -1342,10 +1364,14 @@ async def campaign_event_stream(
     Run the lead pipeline, yielding event payloads (the dicts the SSE stream and
     the durable run worker both consume).
 
-    `control()` is polled before each lead; returning "pause" or "stop" ends the
-    run after the lead in flight, so no half-sent email is left behind. Leads
-    whose `_status` already says sent / skipped / discarded are passed over,
-    which is what lets a resumed run pick up where it stopped.
+    Up to CAMPAIGN_CONCURRENCY leads are scraped and drafted at once; Gmail sends
+    are serialized, with `delay` seconds between them, so parallel drafting never
+    turns into burst sending.
+
+    `control()` is polled before each lead starts; returning "pause" or "stop"
+    lets the leads in flight finish, then ends the run, so no half-sent email is
+    left behind. Leads whose `_status` already says sent / skipped / discarded
+    are passed over, which is what lets a resumed run pick up where it stopped.
     """
     org_id = get_organization_id()
     outdir = os.path.join("out_emails_api", org_id)
@@ -1360,16 +1386,13 @@ async def campaign_event_stream(
         "total": len(leads),
     }
 
-    for idx, row in enumerate(leads):
-        if control is not None:
-            signal = control()
-            if signal in {"pause", "stop"}:
-                yield {"type": "control", "signal": signal}
-                return
+    send_lock = asyncio.Lock()
 
+    async def process_lead(idx: int, row: dict):
         row = dict(row or {})
         had_website = bool(clean_lead_value(row.get("website")))
         search_name = lead_search_name(row)
+        website = clean_lead_value(row.get("website")) or search_name or f"lead {idx + 1}"
 
         if not had_website and not search_name:
             yield {
@@ -1381,11 +1404,11 @@ async def campaign_event_stream(
                 "type": "log",
                 "message": f"Skipping lead {idx + 1}: need website or company/name",
             }
-            continue
+            return
 
         prior = str(row.get("_status") or "").lower()
         if "sent" in prior or "✅" in prior or "skip" in prior or "discard" in prior:
-            continue
+            return
 
         yield {"type": "status_update", "row_index": idx, "status": "⚙️ Processing..."}
         yield _stage_payload(idx, "queued", "Queued", "done")
@@ -1554,7 +1577,7 @@ async def campaign_event_stream(
                     "to": to_email,
                 }
                 yield {"type": "status_update", "row_index": idx, "status": "📝 Ready for review"}
-                continue
+                return
 
             yield _stage_payload(
                 idx,
@@ -1562,9 +1585,11 @@ async def campaign_event_stream(
                 f"Sending via Gmail{f' as {sender_from}' if sender_from else ''}",
             )
             yield {"type": "log", "message": f"Sending email via Gmail for {website}"}
-            send_result = await run_in_thread(
-                send_email_gsuite, eml_path, sender_email or sender_from or None, org_id
-            )
+            async with send_lock:
+                send_result = await run_in_thread(
+                    send_email_gsuite, eml_path, sender_email or sender_from or None, org_id
+                )
+                await asyncio.sleep(delay)
 
             if not send_result.get("success"):
                 raise Exception(send_result.get("error", "Gmail sending failed."))
@@ -1611,7 +1636,7 @@ async def campaign_event_stream(
             err_msg = str(e)
             if "Content filter triggered" in err_msg:
                 log_msg = (
-                    f"Policy Violation: Azure's safety filters flagged the content for {website}. "
+                    f"Policy Violation: the AI provider's safety filters flagged the content for {website}. "
                     "This often happens if the website content or our prompt looks suspicious to the AI."
                 )
                 status_msg = "❌ Safety Filter Triggered"
@@ -1623,8 +1648,54 @@ async def campaign_event_stream(
             yield {"type": "log", "message": log_msg}
             yield {"type": "status_update", "row_index": idx, "status": status_msg}
 
-        await asyncio.sleep(delay)
+    slots = asyncio.Semaphore(CAMPAIGN_CONCURRENCY)
+    events: asyncio.Queue = asyncio.Queue()
+    finished = object()
+    workers: list[asyncio.Task] = []
+    stop_signal: Optional[str] = None
 
+    async def run_lead(idx: int, row: dict) -> None:
+        try:
+            async for payload in process_lead(idx, row):
+                await events.put(payload)
+        except Exception as e:  # noqa: BLE001 - process_lead records its own failures
+            await events.put({"type": "log", "message": f"Lead {idx + 1} stopped unexpectedly: {e}"})
+        finally:
+            slots.release()
+
+    async def schedule() -> None:
+        nonlocal stop_signal
+        try:
+            for idx, row in enumerate(leads):
+                await slots.acquire()
+                if control is not None:
+                    signal = await asyncio.to_thread(control)
+                    if signal in {"pause", "stop"}:
+                        stop_signal = signal
+                        slots.release()
+                        break
+                workers.append(asyncio.create_task(run_lead(idx, row)))
+            await asyncio.gather(*workers, return_exceptions=True)
+        finally:
+            await events.put(finished)
+
+    scheduler = asyncio.create_task(schedule())
+    try:
+        while True:
+            payload = await events.get()
+            if payload is finished:
+                break
+            yield payload
+    finally:
+        if not scheduler.done():
+            scheduler.cancel()
+        for task in workers:
+            if not task.done():
+                task.cancel()
+
+    if stop_signal:
+        yield {"type": "control", "signal": stop_signal}
+        return
     yield {"type": "done", "message": "Processing complete!"}
 
 

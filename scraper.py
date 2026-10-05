@@ -149,7 +149,7 @@ def invoke_chain_get_text(chunk):
         {"role": "user", "content": f"Website text:\n\n{chunk}"},
     ]
     return azure_manager.chat_completion(
-        messages, temperature=0.0, max_tokens=2048, json_mode=True
+        messages, temperature=0.0, max_tokens=2048, json_mode=True, tier="fast"
     )
 
 def analyze_text_with_llm(full_text):
@@ -180,6 +180,7 @@ def analyze_text_with_llm(full_text):
             temperature=0.0,
             max_tokens=2048,
             json_mode=True,
+            tier="fast",
         )
 
     try:

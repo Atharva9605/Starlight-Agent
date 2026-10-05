@@ -168,6 +168,7 @@ def maybe_summarize_conversation(conversation_id: str, messages: list[dict]) -> 
         ],
         temperature=0.2,
         max_tokens=512,
+        tier="fast",
     )
     summary = (raw or existing).strip()
     if summary:

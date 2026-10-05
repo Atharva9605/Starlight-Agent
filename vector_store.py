@@ -13,7 +13,7 @@ import logging
 import os
 from typing import Any
 
-from embedding_config import get_embedding_dimension, validate_embedding
+from embedding_config import current_embedding_tag, get_embedding_dimension, validate_embedding
 
 log = logging.getLogger("vector_store")
 
@@ -120,6 +120,17 @@ def init_db() -> None:
                 """
             )
             cur.execute(
+                "ALTER TABLE catalogue_chunks "
+                "ADD COLUMN IF NOT EXISTS embedding_model TEXT NOT NULL DEFAULT ''"
+            )
+            tag = current_embedding_tag()
+            if tag.startswith("azure:"):
+                # Rows written before the column existed came from the Azure deployment.
+                cur.execute(
+                    "UPDATE catalogue_chunks SET embedding_model = %s WHERE embedding_model = ''",
+                    (tag,),
+                )
+            cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_catalogue_chunks_source "
                 "ON catalogue_chunks (source)"
             )
@@ -180,6 +191,7 @@ def add_chunks(
         validate_embedding(emb, context=f"chunk index {i}")
 
     if use_postgres():
+        tag = current_embedding_tag()
         conn = _pg_conn()
         try:
             with conn.cursor() as cur:
@@ -189,17 +201,19 @@ def add_chunks(
                     cur.execute(
                         """
                         INSERT INTO catalogue_chunks
-                            (id, source, catalogue_name, document, embedding, metadata, organization_id)
-                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
+                            (id, source, catalogue_name, document, embedding, metadata,
+                             organization_id, embedding_model)
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s)
                         ON CONFLICT (id) DO UPDATE SET
                             source = EXCLUDED.source,
                             catalogue_name = EXCLUDED.catalogue_name,
                             document = EXCLUDED.document,
                             embedding = EXCLUDED.embedding,
                             metadata = EXCLUDED.metadata,
-                            organization_id = EXCLUDED.organization_id
+                            organization_id = EXCLUDED.organization_id,
+                            embedding_model = EXCLUDED.embedding_model
                         """,
-                        (chunk_id, source, cat_name, doc, emb, json.dumps(meta), organization_id),
+                        (chunk_id, source, cat_name, doc, emb, json.dumps(meta), organization_id, tag),
                     )
             conn.commit()
         finally:
@@ -208,6 +222,56 @@ def add_chunks(
 
     collection = _chroma_collection()
     collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
+
+
+def reembed_stale_chunks(batch_size: int = 16) -> int:
+    """
+    Re-embed every chunk written by a different embedding model than the active
+    one, across all orgs. Queries skip stale rows, so retrieval stays correct
+    (just thinner) until this finishes. Returns the number of chunks updated.
+    """
+    if not use_postgres():
+        return 0
+    from azure_client import azure_manager
+
+    tag = current_embedding_tag()
+    updated = 0
+    failed_ids: set[str] = set()
+    while True:
+        conn = _pg_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, document FROM catalogue_chunks
+                    WHERE embedding_model <> %s AND NOT (id = ANY(%s))
+                    ORDER BY id LIMIT %s
+                    """,
+                    (tag, list(failed_ids), batch_size),
+                )
+                rows = cur.fetchall()
+            if not rows:
+                break
+            try:
+                vectors = azure_manager.embed_documents([r[1] for r in rows], batch_size=batch_size)
+            except Exception as exc:  # noqa: BLE001 - skip this batch, keep the rest moving
+                log.warning("Re-embedding batch failed (%s); will retry on next start", exc)
+                failed_ids.update(r[0] for r in rows)
+                continue
+            with conn.cursor() as cur:
+                for (chunk_id, _doc), vec in zip(rows, vectors):
+                    validate_embedding(vec, context=f"re-embed {chunk_id}")
+                    cur.execute(
+                        "UPDATE catalogue_chunks SET embedding = %s::vector, embedding_model = %s WHERE id = %s",
+                        (vec, tag, chunk_id),
+                    )
+            conn.commit()
+            updated += len(rows)
+        finally:
+            conn.close()
+    if updated:
+        log.info("Re-embedded %d catalogue chunks with %s", updated, tag)
+    return updated
 
 
 def delete_by_source(source: str, organization_id: str | None = None) -> int:
@@ -360,11 +424,18 @@ def query(
                     f"""
                     SELECT id, document, metadata, (embedding <=> %s::vector) AS distance
                     FROM catalogue_chunks
-                    WHERE organization_id = %s{extra_sql}
+                    WHERE organization_id = %s AND embedding_model = %s{extra_sql}
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
-                    (query_embedding, organization_id, *extra_params, query_embedding, k),
+                    (
+                        query_embedding,
+                        organization_id,
+                        current_embedding_tag(),
+                        *extra_params,
+                        query_embedding,
+                        k,
+                    ),
                 )
                 rows = cur.fetchall()
         finally:
@@ -462,8 +533,12 @@ def store_info() -> dict[str, Any]:
         "embedding_dimension": get_embedding_dimension(),
         "collection": COLLECTION_NAME,
     }
-    deployment = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
-    info["embedding_deployment"] = deployment
+    from azure_client import active_provider
+
+    if active_provider() == "gemini":
+        info["embedding_deployment"] = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+    else:
+        info["embedding_deployment"] = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
     if use_postgres():
         info["database"] = "postgresql (Neon/pgvector)"
     else:

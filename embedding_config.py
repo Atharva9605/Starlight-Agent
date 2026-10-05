@@ -33,6 +33,12 @@ def get_embedding_dimension() -> int:
         log.info("Using EMBEDDING_DIMENSION=%s from environment", dim)
         return dim
 
+    from azure_client import active_provider
+
+    if active_provider() == "gemini":
+        # Gemini embeddings are requested at this size (dimensions=), matching ada-002's schema.
+        return 1536
+
     deployment = (
         os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002").strip().lower()
     )
@@ -64,6 +70,16 @@ def get_embedding_dimension() -> int:
             exc,
         )
         return 1536
+
+
+def current_embedding_tag() -> str:
+    """Identifies the model behind stored vectors; vectors from different models are not comparable."""
+    from azure_client import active_provider
+
+    if active_provider() == "gemini":
+        model = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001").strip()
+        return f"gemini:{model}@{get_embedding_dimension()}"
+    return "azure:" + os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002").strip()
 
 
 def validate_embedding(vector: list[float], *, context: str = "") -> None:

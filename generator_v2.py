@@ -191,7 +191,7 @@ def query_rag_with_trace(
             {"role": "system", "content": get_prompt("hyde_system")},
             {"role": "user", "content": hyde_user},
         ]
-        hyde_doc = azure_manager.chat_completion(hyde_messages, temperature=0.1, max_tokens=512)
+        hyde_doc = azure_manager.chat_completion(hyde_messages, temperature=0.1, max_tokens=512, tier="fast")
 
         combined_query = (
             f"Client Context:\n{client_desc}\n\n"

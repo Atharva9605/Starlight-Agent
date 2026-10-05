@@ -73,6 +73,7 @@ def extract_text_from_bytes(filename: str, mime_type: str, data: bytes) -> str:
                     "Extract any readable text, product names, quantities, PO numbers, "
                     "and key facts. Be concise (≤200 words)."
                 ),
+                tier="fast",
             )
             return (caption or f"[Image attachment: {filename}]").strip()[:8000]
         except Exception as exc:

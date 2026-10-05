@@ -102,6 +102,7 @@ def _extract_text_chunks(batch: str) -> list[str]:
         ],
         temperature=0.0,
         max_tokens=4096,
+        tier="fast",
     )
     cleaned = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
     try:
