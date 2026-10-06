@@ -167,6 +167,8 @@ type CampaignValue = {
   /** Server-side run backing the current campaign, if any. */
   runId: string | null
   runRecord: CampaignRun | null
+  /** Server record of the current review-mode campaign, if one could be created. */
+  reviewRunId: string | null
   /** True while a snapshot is being loaded, so pages wait instead of redirecting. */
   attaching: boolean
   /** A run that finished while this tab was away — offer it, do not hijack. */
@@ -250,6 +252,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const [runRecord, setRunRecord] = useState<CampaignRun | null>(null)
   const [attaching, setAttaching] = useState(false)
   const [finishedRun, setFinishedRun] = useState<CampaignRun | null>(null)
+  const [reviewRunId, setReviewRunId] = useState<string | null>(null)
   const [bulkEdits, setBulkEdits] = useState<string[]>([])
   const [bulkRevising, setBulkRevising] = useState(false)
   const [bulkReviseProgress, setBulkReviseProgress] = useState({ done: 0, total: 0 })
@@ -266,16 +269,30 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   const streamAbortRef = useRef<AbortController | null>(null)
   const cursorRef = useRef(0)
   const runIdRef = useRef<string | null>(null)
+  // Server record of a review-mode campaign. Kept apart from runIdRef, which
+  // means "a worker owns this run" and routes stop/pause/resume to it.
+  const reviewRunIdRef = useRef<string | null>(null)
   const previewFetchRef = useRef<Set<number>>(new Set())
   leadsRef.current = leads
   currentIndexRef.current = currentIndex
   runIdRef.current = runId
   optsRef.current = { template, delay, recipientOverride, senderEmail, autosend, attachProductSheet }
 
+  /**
+   * Change leads and leadsRef together. Settle checks read leadsRef right after
+   * an await, before React has run any queued state updater.
+   */
+  const updateLeads = (fn: (prev: Lead[]) => Lead[]) => {
+    const next = fn(leadsRef.current)
+    leadsRef.current = next
+    setLeads(next)
+  }
+
 
   const uploadLeads = useCallback(async (file: File) => {
     const res = await api.uploadLeads(file)
-    setLeads(res.leads || [])
+    forgetReviewRun()
+    updateLeads(() => res.leads || [])
     setFileName(file.name)
     setLogs([])
     setDraft(null)
@@ -293,7 +310,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const removeLead = useCallback((index: number) => {
-    setLeads((prev) => prev.filter((_, i) => i !== index))
+    updateLeads((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
   const forgetRun = () => {
@@ -310,6 +327,18 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  /** Close the server record of a review campaign. The server leaves runs that already ended alone. */
+  const closeReviewRun = (status: 'done' | 'stopped') => {
+    const id = reviewRunIdRef.current
+    if (id) void api.finishCampaignRun(id, status).catch(() => undefined)
+  }
+
+  const forgetReviewRun = () => {
+    closeReviewRun('stopped')
+    reviewRunIdRef.current = null
+    setReviewRunId(null)
+  }
+
   const dismissFinishedRun = useCallback(() => {
     setFinishedRun(null)
     try {
@@ -321,7 +350,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const clearLeads = useCallback(() => {
     forgetRun()
-    setLeads([])
+    forgetReviewRun()
+    updateLeads(() => [])
     setFileName('')
     setDraft(null)
     setChat([])
@@ -343,8 +373,9 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
 
   const reset = useCallback(() => {
     forgetRun()
+    forgetReviewRun()
     stopReviewRef.current = true
-    setLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
+    updateLeads((prev) => prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' })))
     setDraft(null)
     setChat([])
     setLogs([])
@@ -382,6 +413,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       return
     }
     setStatus('stopped')
+    closeReviewRun('stopped')
   }, [])
 
   const pause = useCallback(() => {
@@ -401,9 +433,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const setLeadStatus = (index: number, st: string) => {
-    setLeads((prev) => {
+    updateLeads((prev) => {
       const next = prev.map((l, i) => (i === index ? { ...l, _status: st } : l))
-      leadsRef.current = next
       return next
     })
   }
@@ -521,6 +552,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
               attach_product_sheet: opts.attachProductSheet,
               force_discover: forceDiscover,
               exclude_websites: forceDiscover ? exclude : undefined,
+              run_id: reviewRunIdRef.current || undefined,
             })
           } catch (e: any) {
             lastErr = e.message || 'Failed'
@@ -559,7 +591,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           productSheet: res.product_sheet,
         })
       }
-      setLeads((prev) => {
+      updateLeads((prev) => {
         const next = prev.map((l, i) =>
           i === index
             ? {
@@ -579,7 +611,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
               }
             : l,
         )
-        leadsRef.current = next
         return next
       })
       if (usedDiscover) {
@@ -625,11 +656,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
               )
               setDraft(finalDraft)
             }
-            setLeads((prev) => {
+            updateLeads((prev) => {
               const next = prev.map((l, i) =>
                 i === index ? { ...l, _preview_html: rev.html, _subject: rev.subject } : l,
               )
-              leadsRef.current = next
               return next
             })
           } catch {
@@ -655,7 +685,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     } catch (e: any) {
       const err = e.message || 'Failed'
       pushStage(index, { stage: 'error', label: err, state: 'error' })
-      setLeads((prev) => {
+      updateLeads((prev) => {
         const next = prev.map((l, i) =>
           i === index
             ? {
@@ -674,7 +704,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
               }
             : l,
         )
-        leadsRef.current = next
         return next
       })
       applyLeadChat(index, [
@@ -707,9 +736,13 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     })
     if (!open) {
       setStatus('done')
+      closeReviewRun('done')
       return
     }
-    if (stopReviewRef.current) setStatus('stopped')
+    if (stopReviewRef.current) {
+      setStatus('stopped')
+      closeReviewRun('stopped')
+    }
   }
 
   const remainingGenerateJobs = () =>
@@ -759,7 +792,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     for (let i = 0; i < list.length; i++) {
       if (leadHasIdentity(list[i])) jobs.push(i)
     }
-    setLeads((prev) => {
+    updateLeads((prev) => {
       const next = prev.map((l) => {
         const skip = !leadHasIdentity(l)
         return {
@@ -776,7 +809,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
           _exclude_websites: [],
         }
       })
-      leadsRef.current = next
       return next
     })
 
@@ -784,9 +816,28 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     currentIndexRef.current = first
     setCurrentIndex(first)
 
+    forgetReviewRun()
+    try {
+      const opts = optsRef.current
+      const res = await api.createCampaignRun({
+        leads: list.map((l) => Object.fromEntries(Object.entries(l).filter(([k]) => !k.startsWith('_')))),
+        template: opts.template,
+        delay: opts.delay,
+        sender_email: opts.senderEmail,
+        recipient_override: opts.recipientOverride,
+        attach_product_sheet: opts.attachProductSheet,
+        file_name: fileName,
+        review: true,
+      })
+      reviewRunIdRef.current = res.run_id
+      setReviewRunId(res.run_id)
+    } catch (e: any) {
+      setLogs((prev) => [...prev, `This review won't be listed in Campaign runs: ${e?.message || e}`])
+    }
+
     await runGenerateQueue(jobs)
     reviewSettled()
-  }, [generateAt])
+  }, [generateAt, fileName])
 
   // -------------------------------------------------------------------------
   // Durable runs: the campaign lives on the server, the tab only watches it
@@ -807,9 +858,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.campaignRunLeadHtml(id, index)
       if (!res.html) return
-      setLeads((prev) => {
+      updateLeads((prev) => {
         const next = prev.map((l, i) => (i === index ? { ...l, _preview_html: res.html } : l))
-        leadsRef.current = next
         return next
       })
       setLivePreview((p) => (p && p.rowIndex === index && !p.html ? { ...p, html: res.html } : p))
@@ -836,13 +886,12 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         setCurrentIndex(evt.row_index)
         break
       case 'lead_resolved':
-        setLeads((prev) => {
+        updateLeads((prev) => {
           const next = prev.map((l, i) =>
             i === evt.row_index
               ? { ...l, website: evt.website || l.website, company: evt.company || l.company }
               : l,
           )
-          leadsRef.current = next
           return next
         })
         break
@@ -873,7 +922,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         }
         setLivePreview(preview)
         setCurrentIndex(evt.row_index)
-        setLeads((prev) => {
+        updateLeads((prev) => {
           const next = prev.map((l, i) =>
             i === evt.row_index
               ? {
@@ -885,7 +934,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
                 }
               : l,
           )
-          leadsRef.current = next
           return next
         })
         break
@@ -1043,6 +1091,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   /** Hand the campaign to the server and start watching it. */
   const startRun = useCallback(async () => {
     const opts = optsRef.current
+    forgetReviewRun()
     setStatus('running')
     setLogs([])
     setDraft(null)
@@ -1051,9 +1100,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setFinishedRun(null)
     pauseRef.current = false
     stopReviewRef.current = false
-    setLeads((prev) => {
+    updateLeads((prev) => {
       const next = prev.map((l) => ({ ...l, _status: '', _preview_html: '', _subject: '' }))
-      leadsRef.current = next
       return next
     })
 
@@ -1144,9 +1192,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     try {
       await api.campaignSend(d.draftId)
       pushStage(index, { stage: 'send', label: 'Send', state: 'done' })
-      setLeads((prev) => {
+      updateLeads((prev) => {
         const next = prev.map((l, i) => (i === index ? { ...l, _status: '✅ Sent', _queued: false } : l))
-        leadsRef.current = next
         return next
       })
       const nextChat = [
@@ -1184,9 +1231,8 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         /* ignore */
       }
     }
-    setLeads((prev) => {
+    updateLeads((prev) => {
       const next = prev.map((l, i) => (i === index ? { ...l, _status: '⏭ Discarded', _queued: false } : l))
-      leadsRef.current = next
       return next
     })
     dropDraft(index)
@@ -1203,7 +1249,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     if (!d) return
     const lead = leadsRef.current[index]
     const queuedNow = queued ?? !lead?._queued
-    setLeads((prev) => {
+    updateLeads((prev) => {
       const updated = prev.map((l, i) =>
         i === index
           ? {
@@ -1213,7 +1259,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
             }
           : l,
       )
-      leadsRef.current = updated
       return updated
     })
   }, [])
@@ -1275,11 +1320,10 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
         p && p.rowIndex === index ? { ...p, html: res.html, subject: res.subject } : p,
       )
     }
-    setLeads((prev) => {
+    updateLeads((prev) => {
       const next = prev.map((l, i) =>
         i === index ? { ...l, _preview_html: res.html, _subject: res.subject } : l,
       )
-      leadsRef.current = next
       return next
     })
     applyLeadChat(index, [
@@ -1363,7 +1407,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
               from: d.from,
             },
       )
-      setLeads((prev) =>
+      updateLeads((prev) =>
         prev.map((l, i) =>
           i === index ? { ...l, _preview_html: res.html, _subject: res.subject } : l,
         ),
@@ -1482,6 +1526,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     runSender,
     runId,
     runRecord,
+    reviewRunId,
     attaching,
     finishedRun,
     counts,

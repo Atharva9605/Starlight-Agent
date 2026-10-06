@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   AddRegular,
   ArrowClockwiseRegular,
+  ArrowRightRegular,
   CheckmarkCircleRegular,
   DeleteRegular,
   DismissRegular,
@@ -96,6 +97,7 @@ export function CampaignReviewPage() {
     livePreview,
     draftsByLead,
     runSender,
+    reviewRunId,
     recipientOverride,
     sendLead,
     discardLead,
@@ -272,9 +274,15 @@ export function CampaignReviewPage() {
               >
                 <AddRegular /> New campaign
               </button>
-              <Link to="/inbox" className="btn">
-                <MailInboxRegular /> Inbox
-              </Link>
+              {reviewRunId ? (
+                <Link to={`/campaigns/runs/${reviewRunId}`} className="btn">
+                  See the whole run <ArrowRightRegular />
+                </Link>
+              ) : (
+                <Link to="/inbox" className="btn">
+                  <MailInboxRegular /> Inbox
+                </Link>
+              )}
             </>
           ) : (
             <>

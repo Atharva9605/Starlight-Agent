@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import shutil
 import tempfile
 import asyncio
@@ -1167,15 +1168,85 @@ class CampaignGenerateRequest(BaseModel):
     attach_product_sheet: bool = True
     force_discover: bool = False
     exclude_websites: Optional[list[str]] = None
+    # Review-mode run this draft belongs to; its lead row tracks the draft's fate.
+    run_id: Optional[str] = None
 
 
 class CampaignReviseRequest(BaseModel):
     message: str
 
 
+def _review_run_id(run_id: Optional[str]) -> Optional[str]:
+    """The run id, if it names a review run of this org. A closed one is reopened."""
+    if not run_id or not use_postgres():
+        return None
+    run = campaign_runs.get_run(run_id, get_organization_id())
+    if not run or not (run.get("options") or {}).get("review"):
+        return None
+    if run["status"] != campaign_runs.REVIEW_STATUS:
+        campaign_runs.reopen_review_run(run_id)
+    return run_id
+
+
+async def _record_review(run_id: Optional[str], *payloads: dict, settle: bool = False) -> None:
+    """Fold review events into the run record. Never fails the request it rides on."""
+    if not run_id:
+        return
+    try:
+        for payload in payloads:
+            await asyncio.to_thread(campaign_runs.append_event, run_id, payload)
+        if settle:
+            await asyncio.to_thread(campaign_runs.complete_review_run_if_settled, run_id)
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger("api").warning("review run %s not updated: %s", run_id, e)
+
+
+def _review_failure(idx: int, err: str) -> tuple[dict, ...]:
+    return (
+        _stage_payload(idx, "error", err[:120], "error"),
+        {"type": "log", "message": f"Lead {idx + 1} failed: {err}"},
+        {"type": "status_update", "row_index": idx, "status": f"❌ {err[:120]}"},
+    )
+
+
 @app.post("/api/campaign/generate")
 async def campaign_generate(req: CampaignGenerateRequest):
     """Scrape + generate one outbound draft. Does not send."""
+    run_id = await asyncio.to_thread(_review_run_id, req.run_id)
+    idx = req.row_index
+    await _record_review(
+        run_id, {"type": "status_update", "row_index": idx, "status": "⚙️ Generating…"}
+    )
+    try:
+        res = await _generate_campaign_draft(req, run_id)
+    except HTTPException as e:
+        detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
+        await _record_review(run_id, *_review_failure(idx, detail), settle=True)
+        raise
+    except Exception as e:
+        await _record_review(run_id, *_review_failure(idx, str(e)), settle=True)
+        raise
+    await _record_review(
+        run_id,
+        {"type": "lead_resolved", "row_index": idx, "website": res["website"], "company": res["company"]},
+        {
+            "type": "preview_html",
+            "row_index": idx,
+            "html": res["html"],
+            "subject": res["subject"],
+            "to": res["to"],
+            "company": res["company"],
+            "website": res["website"],
+            "product_count": res["product_count"],
+            "product_sheet": res["product_sheet"],
+        },
+        {"type": "log", "message": f"Draft ready for {res['website']}"},
+        {"type": "status_update", "row_index": idx, "status": "📝 Ready for review"},
+    )
+    return res
+
+
+async def _generate_campaign_draft(req: CampaignGenerateRequest, run_id: Optional[str]) -> dict:
     lead = dict(req.lead or {})
     had_website = bool(clean_lead_value(lead.get("website")))
     exclude = list(req.exclude_websites or [])
@@ -1255,6 +1326,9 @@ async def campaign_generate(req: CampaignGenerateRequest):
         "row_index": req.row_index,
         "chat": [],
         "discovered": used_openserp,
+        "run_id": run_id,
+        "product_count": len((trace_info or {}).get("product_refs") or []),
+        "product_sheet": (trace_info or {}).get("product_sheet_name") or "",
     }
     draft_id = store_draft(draft)
     return {
@@ -1298,6 +1372,18 @@ async def campaign_revise(draft_id: str, body: CampaignReviseRequest):
     draft.setdefault("chat", []).append({"role": "user", "content": body.message})
     draft["chat"].append({"role": "assistant", "content": "Updated the email."})
     await run_in_thread(rewrite_eml, draft)
+    await _record_review(
+        draft.get("run_id"),
+        {
+            "type": "preview_html",
+            "row_index": draft.get("row_index", 0),
+            "html": draft["html"],
+            "subject": draft["subject"],
+            "to": draft.get("to") or "",
+            "product_count": draft.get("product_count") or 0,
+            "product_sheet": draft.get("product_sheet") or "",
+        },
+    )
     return {
         "draft_id": draft_id,
         "subject": draft["subject"],
@@ -1323,11 +1409,12 @@ async def campaign_send(draft_id: str):
         draft.get("sender_email") or "",
         get_organization_id(),
     )
+    run_id = draft.get("run_id")
+    idx = draft.get("row_index", 0)
     if not send_result.get("success"):
-        raise HTTPException(
-            status_code=500,
-            detail=send_result.get("error") or "GSuite sending failed",
-        )
+        err = send_result.get("error") or "GSuite sending failed"
+        await _record_review(run_id, *_review_failure(idx, err), settle=True)
+        raise HTTPException(status_code=500, detail=err)
 
     recipient_email = (draft.get("to") or "").strip()
     if use_postgres() and recipient_email:
@@ -1352,6 +1439,13 @@ async def campaign_send(draft_id: str):
             log.warning("conversation not saved after send: %s", conv_err)
 
     pop_draft(draft_id)
+    await _record_review(
+        run_id,
+        _stage_payload(idx, "send", "Sent", "done"),
+        {"type": "log", "message": f"Sent to {recipient_email or 'recipient'} · {draft.get('company') or draft.get('website') or f'lead {idx + 1}'}"},
+        {"type": "status_update", "row_index": idx, "status": "✅ Sent"},
+        settle=True,
+    )
     return {
         "status": "sent",
         "message_id": send_result.get("message_id"),
@@ -1366,6 +1460,13 @@ async def campaign_discard(draft_id: str):
     if not draft or draft.get("organization_id") != get_organization_id():
         raise HTTPException(status_code=404, detail="Draft not found")
     pop_draft(draft_id)
+    idx = draft.get("row_index", 0)
+    await _record_review(
+        draft.get("run_id"),
+        {"type": "log", "message": f"Discarded lead {idx + 1}"},
+        {"type": "status_update", "row_index": idx, "status": "⏭ Discarded"},
+        settle=True,
+    )
     return {"status": "discarded"}
 
 
@@ -1776,6 +1877,12 @@ class CampaignRunRequest(BaseModel):
     file_name: str = ""
     # ISO-8601 instant; when set the run waits until then instead of starting now.
     scheduled_at: Optional[str] = None
+    # Review mode: only record the campaign; the reviewer sends each draft by hand.
+    review: bool = False
+
+
+class FinishRunRequest(BaseModel):
+    status: str = "done"
 
 
 def _parse_scheduled_at(value: Optional[str]) -> Optional[datetime]:
@@ -1828,6 +1935,8 @@ async def create_campaign_run(req: CampaignRunRequest):
     _require_runs_db()
     if not req.leads:
         raise HTTPException(status_code=400, detail="No leads to send")
+    if req.review and req.scheduled_at:
+        raise HTTPException(status_code=400, detail="Review campaigns can't be scheduled")
     scheduled_at = _parse_scheduled_at(req.scheduled_at)
 
     ctx = get_tenant_context()
@@ -1841,13 +1950,25 @@ async def create_campaign_run(req: CampaignRunRequest):
             "sender_email": req.sender_email,
             "recipient_override": req.recipient_override,
             "attach_product_sheet": req.attach_product_sheet,
-            "autosend": True,
+            "autosend": not req.review,
+            "review": req.review,
         },
         file_name=req.file_name,
         created_by=ctx.user_id,
         created_by_email=ctx.email,
         scheduled_at=scheduled_at,
+        review=req.review,
     )
+    if req.review:
+        await _record_review(run_id, {"type": "log", "message": "Review campaign started — every email is sent by hand."})
+        for idx, lead in enumerate(req.leads):
+            lead = lead or {}
+            if not any(clean_lead_value(lead.get(k)) for k in ("website", "company", "name")):
+                await _record_review(
+                    run_id,
+                    {"type": "status_update", "row_index": idx, "status": "⏭ Skipped (need company or website)"},
+                )
+        return {"run_id": run_id, "status": campaign_runs.REVIEW_STATUS}
     if scheduled_at:
         await asyncio.to_thread(
             campaign_runs.append_event,
@@ -1991,6 +2112,11 @@ async def resume_campaign_run(run_id: str):
     """Hand the run back to a worker; it restarts at the first unsent lead."""
     _require_runs_db()
     run = _run_or_404(run_id)
+    if (run.get("options") or {}).get("review"):
+        raise HTTPException(
+            status_code=409,
+            detail="This campaign was reviewed by hand, so it can't be resumed automatically.",
+        )
     if run["status"] == "running" and campaign_runs.is_worker_live(run_id):
         return {"status": "running"}
     if run["counts"].get("retriable", run["counts"]["pending"]) <= 0:
@@ -2005,6 +2131,18 @@ async def resume_campaign_run(run_id: str):
             detail="This run is already being worked on somewhere else",
         )
     return {"status": "running"}
+
+
+@app.post("/api/campaign/runs/{run_id}/finish")
+async def finish_campaign_run(run_id: str, body: FinishRunRequest):
+    """Close a review campaign: the reviewer handled everything, or walked away."""
+    _require_runs_db()
+    run = _run_or_404(run_id)
+    status = body.status if body.status in ("done", "stopped") else "done"
+    closed = await asyncio.to_thread(
+        campaign_runs.finish_review_run, run_id, get_organization_id(), status
+    )
+    return {"status": status if closed else run["status"]}
 
 
 @app.delete("/api/campaign/runs/{run_id}")

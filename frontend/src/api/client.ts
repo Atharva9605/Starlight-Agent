@@ -74,7 +74,7 @@ export type PublicCatalogue = {
   products: LibraryProduct[]
 }
 
-export type CampaignRunStatus = 'scheduled' | 'running' | 'paused' | 'done' | 'stopped' | 'failed'
+export type CampaignRunStatus = 'scheduled' | 'running' | 'paused' | 'reviewing' | 'done' | 'stopped' | 'failed'
 
 export type CampaignRunCounts = {
   total: number
@@ -102,6 +102,8 @@ export type CampaignRun = {
     sender_email?: string
     recipient_override?: string
     attach_product_sheet?: boolean
+    /** Sent by hand from the review screen; the server never resumes these. */
+    review?: boolean
   }
   counts: CampaignRunCounts
   created_at: string
@@ -354,6 +356,7 @@ export const api = {
     attach_product_sheet?: boolean
     force_discover?: boolean
     exclude_websites?: string[]
+    run_id?: string
   }) =>
     request<{
       draft_id: string
@@ -399,6 +402,8 @@ export const api = {
     file_name?: string
     /** ISO instant; the run waits on the server until then. */
     scheduled_at?: string
+    /** Record only — each draft is sent by hand from the review screen. */
+    review?: boolean
   }) =>
     request<{ run_id: string; status: string; scheduled_at?: string }>('/api/campaign/runs', {
       method: 'POST',
@@ -420,6 +425,11 @@ export const api = {
     }),
   stopCampaignRun: (runId: string) =>
     request<{ status: string }>(`/api/campaign/runs/${runId}/stop`, { method: 'POST' }),
+  finishCampaignRun: (runId: string, status: 'done' | 'stopped') =>
+    request<{ status: string }>(`/api/campaign/runs/${runId}/finish`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
+    }),
   deleteCampaignRun: (runId: string) =>
     request(`/api/campaign/runs/${runId}`, { method: 'DELETE' }),
 

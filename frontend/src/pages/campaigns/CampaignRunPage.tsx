@@ -32,6 +32,7 @@ const RUN_BADGE: Record<string, { label: string; cls: string }> = {
   scheduled: { label: 'Scheduled', cls: 'purple' },
   running: { label: 'Sending', cls: 'brand' },
   paused: { label: 'Paused', cls: 'warning' },
+  reviewing: { label: 'In review', cls: 'brand' },
   done: { label: 'Completed', cls: 'success' },
   stopped: { label: 'Stopped', cls: '' },
   failed: { label: 'Failed', cls: 'danger' },
@@ -100,7 +101,7 @@ export function CampaignRunPage() {
 
   // A run still sending is better watched live, but keep this view fresh anyway.
   useEffect(() => {
-    if (snap?.run.status !== 'running') return
+    if (snap?.run.status !== 'running' && snap?.run.status !== 'reviewing') return
     const t = setInterval(() => void load(), 5000)
     return () => clearInterval(t)
   }, [snap?.run.status, load])
@@ -171,7 +172,8 @@ export function CampaignRunPage() {
 
   const run = snap.run
   // Failures count as resumable — a resume retries them along with the untouched.
-  const canResume = run.counts.retriable > 0 && run.status !== 'running'
+  const canResume =
+    run.counts.retriable > 0 && run.status !== 'running' && run.status !== 'reviewing' && !run.options?.review
   const runBadge = RUN_BADGE[run.status] || { label: run.status, cls: '' }
 
   return (

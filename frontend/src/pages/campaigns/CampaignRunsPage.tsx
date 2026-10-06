@@ -18,6 +18,7 @@ const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   scheduled: { label: 'Scheduled', cls: 'purple' },
   running: { label: 'Sending', cls: 'brand' },
   paused: { label: 'Paused', cls: 'warning' },
+  reviewing: { label: 'In review', cls: 'brand' },
   done: { label: 'Completed', cls: 'success' },
   stopped: { label: 'Stopped', cls: '' },
   failed: { label: 'Failed', cls: 'danger' },
@@ -43,7 +44,7 @@ type RunFilter = 'all' | 'active' | 'scheduled' | 'finished'
 
 const FILTERS: { id: RunFilter; label: string; match: (r: CampaignRun) => boolean }[] = [
   { id: 'all', label: 'All', match: () => true },
-  { id: 'active', label: 'Sending', match: (r) => r.status === 'running' || r.status === 'paused' },
+  { id: 'active', label: 'Sending', match: (r) => r.status === 'running' || r.status === 'paused' || r.status === 'reviewing' },
   { id: 'scheduled', label: 'Scheduled', match: (r) => r.status === 'scheduled' },
   { id: 'finished', label: 'Finished', match: (r) => r.status === 'done' || r.status === 'stopped' || r.status === 'failed' },
 ]
@@ -253,6 +254,7 @@ export function CampaignRunsPage() {
                           <span className="cell-sub">
                             {run.total} lead{run.total === 1 ? '' : 's'}
                             {run.sender_email ? ` · from ${run.sender_email}` : ''}
+                            {run.options?.review ? ' · reviewed' : ''}
                             {run.options?.recipient_override ? ' · test run' : ''}
                           </span>
                         </div>

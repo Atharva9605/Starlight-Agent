@@ -33,6 +33,10 @@ log = logging.getLogger("campaign_runs")
 ACTIVE_STATUSES = ("running", "paused")
 TERMINAL_STATUSES = ("done", "stopped", "failed")
 SCHEDULED_STATUS = "scheduled"
+# Review-mode campaigns: a person sends each email by hand, so no worker ever
+# owns the run. It must stay out of ACTIVE_STATUSES and never become 'running',
+# or orphan adoption would start autosending the leads nobody approved.
+REVIEW_STATUS = "reviewing"
 
 # A run whose heartbeat is older than this is considered orphaned (API restart)
 # and may be adopted by another worker.
@@ -191,10 +195,14 @@ def create_run(
     created_by: str = "",
     created_by_email: str = "",
     scheduled_at: Optional[datetime] = None,
+    review: bool = False,
 ) -> str:
     _require_postgres()
     run_id = str(uuid.uuid4())
-    status = SCHEDULED_STATUS if scheduled_at else "running"
+    if review:
+        status = REVIEW_STATUS
+    else:
+        status = SCHEDULED_STATUS if scheduled_at else "running"
     conn = _pg_conn()
     try:
         with conn.cursor() as cur:
@@ -535,6 +543,77 @@ def cancel_scheduled_run(run_id: str, organization_id: str) -> bool:
                 WHERE id = %s AND organization_id = %s AND status = %s
                 """,
                 (run_id, organization_id, SCHEDULED_STATUS),
+            )
+            ok = cur.rowcount > 0
+        conn.commit()
+        return ok
+    finally:
+        conn.close()
+
+
+def complete_review_run_if_settled(run_id: str) -> bool:
+    """Close a review run once no lead is still waiting, being written or awaiting review."""
+    if not use_postgres():
+        return False
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE campaign_runs
+                SET status = 'done', updated_at = NOW(), finished_at = NOW()
+                WHERE id = %s AND status = %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM campaign_run_leads
+                      WHERE run_id = %s AND state IN ('pending', 'processing')
+                  )
+                """,
+                (run_id, REVIEW_STATUS, run_id),
+            )
+            ok = cur.rowcount > 0
+        conn.commit()
+        return ok
+    finally:
+        conn.close()
+
+
+def reopen_review_run(run_id: str) -> bool:
+    """Put a closed review run back in review, e.g. when a failed lead is retried."""
+    if not use_postgres():
+        return False
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE campaign_runs
+                SET status = %s, control = 'run', finished_at = NULL, updated_at = NOW()
+                WHERE id = %s AND status IN ('done', 'stopped')
+                  AND options->>'review' = 'true'
+                """,
+                (REVIEW_STATUS, run_id),
+            )
+            ok = cur.rowcount > 0
+        conn.commit()
+        return ok
+    finally:
+        conn.close()
+
+
+def finish_review_run(run_id: str, organization_id: str, status: str) -> bool:
+    """End a review run the reviewer closed. Leaves runs that already ended untouched."""
+    if not use_postgres() or status not in TERMINAL_STATUSES:
+        return False
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE campaign_runs
+                SET status = %s, control = 'stop', updated_at = NOW(), finished_at = NOW()
+                WHERE id = %s AND organization_id = %s AND status = %s
+                """,
+                (status, run_id, organization_id, REVIEW_STATUS),
             )
             ok = cur.rowcount > 0
         conn.commit()

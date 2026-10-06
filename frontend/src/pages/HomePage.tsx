@@ -21,6 +21,7 @@ const RUN_BADGE: Record<string, { label: string; cls: string }> = {
   scheduled: { label: 'Scheduled', cls: 'purple' },
   running: { label: 'Sending', cls: 'brand' },
   paused: { label: 'Paused', cls: 'warning' },
+  reviewing: { label: 'In review', cls: 'brand' },
   done: { label: 'Completed', cls: 'success' },
   stopped: { label: 'Stopped', cls: '' },
   failed: { label: 'Failed', cls: 'danger' },
@@ -49,7 +50,9 @@ export function HomePage() {
   const toReview = conversations.filter(convNeedsReview)
   const waiting = conversations.filter(convClientWaiting)
   const allRuns: CampaignRun[] = runs.data?.runs || []
-  const liveRuns = allRuns.filter((r) => r.status === 'running' || r.status === 'paused' || r.status === 'scheduled')
+  const liveRuns = allRuns.filter(
+    (r) => r.status === 'running' || r.status === 'paused' || r.status === 'reviewing' || r.status === 'scheduled',
+  )
   const recentRuns = allRuns.filter((r) => !liveRuns.includes(r)).slice(0, 5)
   const sentThisMonth = allRuns
     .filter((r) => Date.now() - new Date(r.created_at).getTime() < MONTH_MS)
