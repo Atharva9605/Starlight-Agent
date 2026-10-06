@@ -177,7 +177,7 @@ export function CampaignLivePage() {
       </div>
     )
   }
-  if (!leads.length) return <Navigate to="/campaigns" replace />
+  if (!leads.length) return <Navigate to="/campaigns/new" replace />
   if (status === 'reviewing' || (status === 'paused' && !autosend)) {
     return <Navigate to="/campaigns/review" replace />
   }
@@ -240,7 +240,7 @@ export function CampaignLivePage() {
   return (
     <div>
       <PageHeader
-        breadcrumb={[{ label: 'Campaigns', to: '/campaigns' }, { label: 'Live progress' }]}
+        breadcrumb={[{ label: 'Campaigns', to: '/campaigns/runs' }, { label: 'Live progress' }]}
         kicker={
           activeRun ? (
             <><span className="live-dot" /> Live</>
@@ -282,7 +282,7 @@ export function CampaignLivePage() {
                 type="button"
                 onClick={() => {
                   reset()
-                  nav('/campaigns')
+                  nav('/campaigns/new')
                 }}
               >
                 <AddRegular /> New campaign

@@ -519,6 +519,24 @@ def _pick_text(val, default: str) -> str:
     return text if text else default
 
 
+_HONORIFICS = {"ar", "mr", "mrs", "ms", "dr", "er", "prof", "shri", "smt"}
+
+
+def _fallback_greeting(rec: dict) -> str:
+    """Greet a person when the lead names one, else the firm."""
+    contact = str(rec.get("contact_name") or "").strip()
+    words = [w for w in contact.split() if w.lower().strip(".") not in _HONORIFICS]
+    if words:
+        return f"Dear {words[0].title()},"
+    company = str(rec.get("company") or "").strip()
+    if company and "http" not in company:
+        company = re.sub(r"\b(?:pvt|private|ltd|limited|llp)\b\.?", "", company, flags=re.I)
+        company = re.sub(r"\s{2,}", " ", company).strip(" ,.-")
+        if company:
+            return f"Dear {company} team,"
+    return "Hello,"
+
+
 def _pick_list(val, default: list[str]) -> list[str]:
     items = ensure_list(val if val is not None else [])
     cleaned = [x for x in items if x]
@@ -583,10 +601,7 @@ def generate_eml_from_record(
         parsed.get("preamble"),
         "Architectural linear LED, manufactured near Pune.",
     )
-    opening_line = _pick_text(
-        parsed.get("opening_line"),
-        "Hope this note finds you well.",
-    )
+    opening_line = _pick_text(parsed.get("opening_line"), _fallback_greeting(rec))
 
     product_names = [
         str(r.get("product_name") or "").strip()

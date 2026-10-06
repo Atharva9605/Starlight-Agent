@@ -63,7 +63,7 @@ type NavItem = {
 const workspaceLinks: NavItem[] = [
   { to: '/', label: 'Home', icon: Home, end: true, keywords: 'dashboard overview' },
   { to: '/inbox', label: 'Inbox', icon: Inbox, keywords: 'replies threads drafts mail' },
-  { to: '/campaigns', label: 'Campaigns', icon: Campaigns, end: true, keywords: 'new outreach leads send' },
+  { to: '/campaigns/new', label: 'New campaign', icon: Campaigns, keywords: 'new outreach leads send wizard' },
   { to: '/campaigns/runs', label: 'Campaign runs', icon: Runs, keywords: 'history scheduled' },
   { to: '/catalogues', label: 'Catalogues', icon: Catalogues, keywords: 'pdf products library upload' },
   { to: '/settings', label: 'Settings', icon: Settings, keywords: 'gmail sender profile' },

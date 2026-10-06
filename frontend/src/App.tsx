@@ -8,7 +8,11 @@ import { PrivacyPolicyPage, TermsOfServicePage } from './pages/LegalPages'
 import { HomePage } from './pages/HomePage'
 import { InboxPage } from './pages/InboxPage'
 import { ThreadPage } from './pages/ThreadPage'
-import { CampaignSetupPage } from './pages/campaigns/CampaignSetupPage'
+import { CampaignWizard } from './pages/campaigns/wizard/CampaignWizard'
+import { LeadsStep } from './pages/campaigns/wizard/LeadsStep'
+import { DesignStep } from './pages/campaigns/wizard/DesignStep'
+import { SendingStep } from './pages/campaigns/wizard/SendingStep'
+import { LaunchStep } from './pages/campaigns/wizard/LaunchStep'
 import { CampaignLivePage } from './pages/campaigns/CampaignLivePage'
 import { CampaignReviewPage } from './pages/campaigns/CampaignReviewPage'
 import { CampaignRunsPage } from './pages/campaigns/CampaignRunsPage'
@@ -62,15 +66,21 @@ export default function App() {
               <Route index element={<HomePage />} />
               <Route path="inbox" element={<InboxPage />} />
               <Route path="inbox/:id" element={<ThreadPage />} />
-              <Route path="campaigns" element={<CampaignSetupPage />} />
+              <Route path="campaigns" element={<Navigate to="/campaigns/new" replace />} />
+              <Route path="campaigns/new" element={<CampaignWizard />}>
+                <Route index element={<LeadsStep />} />
+                <Route path="design" element={<DesignStep />} />
+                <Route path="sending" element={<SendingStep />} />
+                <Route path="launch" element={<LaunchStep />} />
+              </Route>
               <Route path="campaigns/review" element={<CampaignReviewPage />} />
               <Route path="campaigns/live" element={<CampaignLivePage />} />
               <Route path="campaigns/runs" element={<CampaignRunsPage />} />
               <Route path="campaigns/runs/:id" element={<CampaignRunPage />} />
-              <Route path="campaigns/new/*" element={<Navigate to="/campaigns" replace />} />
               <Route path="catalogues" element={<CataloguesPage />} />
               <Route path="knowledge" element={<Navigate to="/catalogues" replace />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="settings/:section" element={<SettingsPage />} />
               <Route path="admin/users" element={<UsersPage />} />
               <Route path="admin/prompts" element={<PromptsPage />} />
               <Route path="admin/templates" element={<TemplatesPage />} />

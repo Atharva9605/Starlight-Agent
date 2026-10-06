@@ -150,7 +150,7 @@ export function CampaignReviewPage() {
     if (next !== undefined) selectLead(next)
   }, [leads, advanceFrom, currentIndex, selectLead])
 
-  if (!leads.length) return <Navigate to="/campaigns" replace />
+  if (!leads.length) return <Navigate to="/campaigns/new" replace />
   if (status === 'running') return <Navigate to="/campaigns/live" replace />
 
   if (status === 'idle') {
@@ -161,7 +161,7 @@ export function CampaignReviewPage() {
           title="Nothing to review yet"
           description="Start a campaign from the setup page to generate every email at once."
           actions={
-            <Link to="/campaigns" className="btn">
+            <Link to="/campaigns/new" className="btn">
               Back to setup
             </Link>
           }
@@ -235,7 +235,7 @@ export function CampaignReviewPage() {
   return (
     <div>
       <PageHeader
-        breadcrumb={[{ label: 'Campaigns', to: '/campaigns' }, { label: 'Review' }]}
+        breadcrumb={[{ label: 'Campaigns', to: '/campaigns/runs' }, { label: 'Review' }]}
         kicker={busyBanner ? <><span className="live-dot" /> Working</> : paused ? <span className="badge warning">Paused</span> : null}
         title={headline}
         subtitle={
@@ -253,7 +253,7 @@ export function CampaignReviewPage() {
                 type="button"
                 onClick={() => {
                   reset()
-                  nav('/campaigns')
+                  nav('/campaigns/new')
                 }}
               >
                 <AddRegular /> New campaign

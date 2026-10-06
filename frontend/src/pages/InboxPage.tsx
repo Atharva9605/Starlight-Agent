@@ -90,7 +90,7 @@ export function InboxPage() {
             intent="warning"
             title="Gmail isn't connected"
             actions={
-              <Link to="/settings" className="btn secondary sm">
+              <Link to="/settings/gmail" className="btn secondary sm">
                 <PlugDisconnectedRegular /> Connect Gmail
               </Link>
             }
@@ -159,7 +159,7 @@ export function InboxPage() {
               description="Connect Gmail and run a campaign — replies land here with AI drafts ready to review."
               actions={
                 <>
-                  <Link to="/campaigns" className="btn">
+                  <Link to="/campaigns/new" className="btn">
                     <SendRegular /> Start a campaign
                   </Link>
                   <Link to="/settings" className="btn secondary">

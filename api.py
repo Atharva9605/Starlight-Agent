@@ -1013,6 +1013,40 @@ def _lead_email_from_row(lead: dict | None) -> str:
     return ""
 
 
+_CONTACT_KEYS = (
+    "contact_name",
+    "contact",
+    "contact_person",
+    "person",
+    "first_name",
+    "full_name",
+    "client_name",
+)
+
+
+def _lead_contact_name(lead: dict | None) -> str:
+    """A person's name from the lead row, if the sheet has one.
+
+    A bare ``name`` column only counts when a separate ``company`` column exists;
+    otherwise ``name`` is the company itself (see upload_leads).
+    """
+    if not lead:
+        return ""
+    row = {str(k).strip().lower().replace(" ", "_"): v for k, v in lead.items()}
+    keys = list(_CONTACT_KEYS)
+    company = str(row.get("company") or "").strip()
+    if company:
+        keys.append("name")
+    for key in keys:
+        text = str(row.get(key) or "").strip()
+        if not text or text.lower() in ("nan", "none", "null", "-"):
+            continue
+        if company and text.lower() == company.lower():
+            continue
+        return text[:80]
+    return ""
+
+
 def _apply_recipient(scraped_data: dict, *, recipient_override: str | None = None, lead: dict | None = None) -> None:
     """
     Resolve who the email goes to:
@@ -1020,6 +1054,11 @@ def _apply_recipient(scraped_data: dict, *, recipient_override: str | None = Non
     2) email column on the lead row
     3) otherwise leave scraped emails alone
     """
+    contact = _lead_contact_name(lead)
+    if contact:
+        # Lets the draft greet a person ("Hi Priya,") instead of "Hi <Company> team,".
+        scraped_data["contact_name"] = contact
+
     override = (recipient_override or "").strip()
     if override:
         scraped_data["emails"] = override

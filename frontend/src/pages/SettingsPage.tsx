@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   CheckmarkCircleFilled,
@@ -39,7 +39,11 @@ export function SettingsPage() {
   const { me, logout } = useAuth()
   const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
-  const [section, setSection] = useState<Section>(params.get('gmail_connected') !== null ? 'gmail' : 'identity')
+  const routeNav = useNavigate()
+  const { section: sectionParam } = useParams()
+  const section: Section =
+    params.get('gmail_connected') !== null || sectionParam === 'gmail' ? 'gmail' : sectionParam === 'account' ? 'account' : 'identity'
+  const setSection = (s: Section) => routeNav(`/settings/${s === 'identity' ? 'profile' : s}`)
   const [sender, setSender] = useState<Record<string, string>>({
     sender_name: 'Vivek Dhondarkar',
     sender_company: 'Starlight Linear LED',

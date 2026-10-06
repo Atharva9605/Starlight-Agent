@@ -65,14 +65,14 @@ export function HomePage() {
       done: Boolean(gmail.data?.connected || gmail.data?.mode === 'platform'),
       title: 'Connect Gmail',
       body: 'Campaigns send from this inbox, and client replies sync back into the Inbox.',
-      to: '/settings',
+      to: '/settings/gmail',
       cta: 'Connect',
     },
     {
       done: Boolean(sender.data?.sender_email && sender.data?.sender_name),
       title: 'Fill in your sender profile',
       body: 'Your name, phone and logo appear in every email signature.',
-      to: '/settings',
+      to: '/settings/profile',
       cta: 'Open settings',
     },
     {
@@ -86,7 +86,7 @@ export function HomePage() {
       done: allRuns.length > 0,
       title: 'Send your first campaign',
       body: 'Upload a lead sheet, check the drafts, then send.',
-      to: '/campaigns',
+      to: '/campaigns/new',
       cta: 'Start',
     },
   ]
@@ -114,7 +114,7 @@ export function HomePage() {
             <Link to="/inbox" className="btn secondary">
               <MailInboxRegular /> Open inbox
             </Link>
-            <Link to="/campaigns" className="btn">
+            <Link to="/campaigns/new" className="btn">
               <AddRegular /> New campaign
             </Link>
           </>
@@ -273,7 +273,7 @@ export function HomePage() {
                 description="Upload a lead sheet to send your first personalised campaign."
                 actions={
                   liveRuns.length ? null : (
-                    <Link to="/campaigns" className="btn">
+                    <Link to="/campaigns/new" className="btn">
                       <AddRegular /> New campaign
                     </Link>
                   )

@@ -160,7 +160,7 @@ export function CampaignRunsPage() {
         title="Campaign runs"
         subtitle="Every campaign runs on the server, so closing the tab never stops one. Rejoin a live run or open a finished one."
         actions={
-          <Link to="/campaigns" className="btn">
+          <Link to="/campaigns/new" className="btn">
             <AddRegular /> New campaign
           </Link>
         }
@@ -183,7 +183,7 @@ export function CampaignRunsPage() {
             title="No campaigns yet"
             description="Runs appear here as soon as you start or schedule a campaign."
             actions={
-              <Link to="/campaigns" className="btn">
+              <Link to="/campaigns/new" className="btn">
                 <AddRegular /> New campaign
               </Link>
             }
