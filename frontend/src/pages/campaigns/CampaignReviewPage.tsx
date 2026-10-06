@@ -25,7 +25,7 @@ import {
   useCampaign,
   type Lead,
 } from '../../campaign/CampaignContext'
-import { CardHeader, EmptyState, PageHeader, Spinner, useConfirm } from '../../components/ui'
+import { Avatar, EmptyState, PageHeader, Spinner, useConfirm } from '../../components/ui'
 
 function leadTitle(lead: Lead | undefined, fallback: string) {
   return lead?.company || lead?.name || lead?.website || fallback
@@ -96,6 +96,7 @@ export function CampaignReviewPage() {
     livePreview,
     draftsByLead,
     runSender,
+    recipientOverride,
     sendLead,
     discardLead,
     queueLead,
@@ -232,19 +233,32 @@ export function CampaignReviewPage() {
               : 'Campaign complete'
             : `Review ${counts.total} email${counts.total === 1 ? '' : 's'}`
 
+  const stats: { label: string; value: number; cls: string; onClick?: () => void }[] = [
+    { label: 'Ready', value: counts.ready, cls: 'brand' },
+    { label: 'In bulk', value: queued, cls: 'purple' },
+    { label: 'Sent', value: counts.sent, cls: 'success' },
+    { label: 'Discarded', value: counts.skipped, cls: '' },
+    { label: 'Failed', value: counts.failed, cls: 'danger', onClick: () => setTab('failed') },
+  ]
+  const focusTo = focusDraft?.to || focus?._to
+  const focusSite = (focusDraft?.website || focus?.website || '').replace(/^https?:\/\//, '')
+  const focusName = leadTitle(focusDraft || focus, `Lead ${currentIndex + 1}`)
+
   return (
-    <div>
+    <div className="review-page">
       <PageHeader
         breadcrumb={[{ label: 'Campaigns', to: '/campaigns/runs' }, { label: 'Review' }]}
-        kicker={busyBanner ? <><span className="live-dot" /> Working</> : paused ? <span className="badge warning">Paused</span> : null}
-        title={headline}
-        subtitle={
-          <>
-            {counts.ready} ready · {queued} in bulk · {counts.sent} sent · {counts.skipped} discarded
-            {counts.failed ? ` · ${counts.failed} failed` : ''}
-            {counts.processing ? ` · ${counts.processing} writing` : ''}
-          </>
+        kicker={
+          busyBanner ? (
+            <><span className="live-dot" /> Working</>
+          ) : paused ? (
+            <span className="badge warning">Paused</span>
+          ) : recipientOverride.trim() ? (
+            <span className="badge warning">Test mode · all to {recipientOverride.trim()}</span>
+          ) : null
         }
+        title={headline}
+        subtitle={done ? 'Every email has been handled.' : 'Read each email, ask for changes if needed, then send it now or add it to the bulk send.'}
         actions={
           done ? (
             <>
@@ -264,9 +278,6 @@ export function CampaignReviewPage() {
             </>
           ) : (
             <>
-              <button className="btn danger-outline" type="button" onClick={onStop} disabled={sendingThis}>
-                <StopRegular /> Stop
-              </button>
               {paused ? (
                 <button className="btn secondary" type="button" onClick={() => void resume()} disabled={sendingThis}>
                   <PlayRegular /> Resume
@@ -276,9 +287,8 @@ export function CampaignReviewPage() {
                   <PauseRegular /> Pause
                 </button>
               )}
-              <button className="btn" type="button" disabled={!queued || bulkSending} onClick={onBulkSend}>
-                {bulkSending ? <Spinner size="sm" /> : <SendRegular />}
-                {bulkSending ? 'Sending…' : `Send bulk${queued ? ` (${queued})` : ''}`}
+              <button className="btn danger-outline" type="button" onClick={onStop} disabled={sendingThis}>
+                <StopRegular /> Stop
               </button>
             </>
           )
@@ -291,65 +301,96 @@ export function CampaignReviewPage() {
         </div>
       ) : null}
 
-      <form
-        className="card bulk-edit"
-        style={{ marginBottom: 20 }}
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (!bulkInput.trim() || bulkRevising) return
-          const msg = bulkInput.trim()
-          setBulkInput('')
-          void applyBulkEdit(msg)
-        }}
-      >
-        <CardHeader
-          icon={<SparkleRegular />}
-          title="Edit every email with AI"
-          subtitle={
-            bulkEdits.length
-              ? `${bulkEdits.length} edit${bulkEdits.length === 1 ? '' : 's'} applied to every email`
-              : 'One instruction, applied to every email already written and every one still to come.'
-          }
-          actions={
-            <button type="button" className="btn subtle sm" aria-expanded={bulkOpen || bulkRevising} onClick={() => setBulkOpen((v) => !v)}>
-              {bulkOpen || bulkRevising ? 'Hide' : bulkEdits.length ? 'Show' : 'Add an edit'}
-            </button>
-          }
-        />
-        {bulkOpen || bulkRevising ? (
-        <>
-        {bulkEdits.length ? (
-          <div className="row" style={{ gap: 6 }}>
-            {bulkEdits.map((msg, i) => (
-              <span key={`${i}-${msg.slice(0, 24)}`} className="badge brand text-wrap">
-                <span className="badge-text">{msg}</span>
-                <button type="button" className="chip-x" onClick={() => removeBulkEdit(i)} aria-label={`Remove “${msg}”`}>
-                  <DismissRegular />
-                </button>
-              </span>
-            ))}
-            <button type="button" className="btn subtle sm" onClick={clearBulkEdits}>
-              Clear upcoming
-            </button>
-          </div>
-        ) : null}
-        <div className="chat-compose">
-          <input
-            className="input"
-            placeholder="e.g. Make the tone warmer and shorten the opening"
-            aria-label="Edit instruction for every email"
-            value={bulkInput}
-            disabled={bulkRevising || done}
-            onChange={(e) => setBulkInput(e.target.value)}
-          />
-          <button className="btn" type="submit" disabled={bulkRevising || done || !bulkInput.trim()}>
-            {bulkRevising ? <Spinner size="sm" /> : <SparkleRegular />}
-            {bulkRevising ? `Updating ${bulkReviseProgress.done}/${bulkReviseProgress.total}` : 'Apply to all'}
+      <div className="stat-strip" role="list">
+        {stats.map((s) => (
+          <button
+            key={s.label}
+            type="button"
+            role="listitem"
+            className={`stat-chip ${s.cls}${s.value ? '' : ' zero'}`}
+            onClick={s.onClick}
+            disabled={!s.onClick}
+          >
+            <strong>{s.value}</strong>
+            <span>{s.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <section className="card review-toolbar">
+        <div className="review-toolbar-row">
+          <button
+            className="btn subtle"
+            type="button"
+            disabled={!counts.ready || bulkSending || done}
+            onClick={() => {
+              leads.forEach((_, i) => {
+                if (leadState(leads[i]) === 'ready' && draftsByLead[i]) queueLead(i, true)
+              })
+            }}
+          >
+            <TaskListAddRegular /> Add all ready to bulk
+          </button>
+          <button className="btn" type="button" disabled={!queued || bulkSending || done} onClick={onBulkSend}>
+            {bulkSending ? <Spinner size="sm" /> : <SendRegular />}
+            {bulkSending ? 'Sending…' : `Send bulk${queued ? ` (${queued})` : ''}`}
+          </button>
+          <span className="review-toolbar-sep" />
+          <button
+            type="button"
+            className={`btn ${bulkOpen || bulkRevising ? 'secondary' : 'subtle'}`}
+            aria-expanded={bulkOpen || bulkRevising}
+            disabled={done}
+            onClick={() => setBulkOpen((v) => !v)}
+          >
+            <SparkleRegular /> Edit all with AI
+            {bulkEdits.length ? <span className="tab-count">{bulkEdits.length}</span> : null}
           </button>
         </div>
-        </>
+        {bulkOpen || bulkRevising ? (
+          <form
+            className="review-bulk"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!bulkInput.trim() || bulkRevising) return
+              const msg = bulkInput.trim()
+              setBulkInput('')
+              void applyBulkEdit(msg)
+            }}
+          >
+            <span className="muted text-sm">One instruction, applied to every email already written and every one still to come.</span>
+            {bulkEdits.length ? (
+              <div className="row" style={{ gap: 6 }}>
+                {bulkEdits.map((msg, i) => (
+                  <span key={`${i}-${msg.slice(0, 24)}`} className="badge brand text-wrap">
+                    <span className="badge-text">{msg}</span>
+                    <button type="button" className="chip-x" onClick={() => removeBulkEdit(i)} aria-label={`Remove “${msg}”`}>
+                      <DismissRegular />
+                    </button>
+                  </span>
+                ))}
+                <button type="button" className="btn subtle sm" onClick={clearBulkEdits}>
+                  Clear upcoming
+                </button>
+              </div>
+            ) : null}
+            <div className="chat-compose">
+              <input
+                className="input"
+                placeholder="e.g. Make the tone warmer and shorten the opening"
+                aria-label="Edit instruction for every email"
+                value={bulkInput}
+                disabled={bulkRevising}
+                onChange={(e) => setBulkInput(e.target.value)}
+              />
+              <button className="btn" type="submit" disabled={bulkRevising || !bulkInput.trim()}>
+                {bulkRevising ? <Spinner size="sm" /> : <SparkleRegular />}
+                {bulkRevising ? `Updating ${bulkReviseProgress.done}/${bulkReviseProgress.total}` : 'Apply to all'}
+              </button>
+            </div>
+          </form>
         ) : null}
-      </form>
+      </section>
 
       <div className="board">
         <aside className="card flush board-list">
@@ -376,93 +417,68 @@ export function CampaignReviewPage() {
           </div>
 
           {tab === 'review' ? (
-            <>
-              <div className="board-list-head">
-                <span>{counts.ready} ready to review</span>
-                <button
-                  className="btn subtle sm"
-                  type="button"
-                  disabled={!counts.ready || bulkSending}
-                  onClick={() => {
-                    leads.forEach((_, i) => {
-                      if (leadState(leads[i]) === 'ready' && draftsByLead[i]) queueLead(i, true)
-                    })
-                  }}
-                >
-                  <TaskListAddRegular /> Add all to bulk
-                </button>
-              </div>
-              <div className="board-list-items">
-                {reviewable === 0 ? (
-                  <EmptyState
-                    compact
-                    icon={<ErrorCircleRegular />}
-                    title="No emails to review"
-                    description="Every lead failed. Check the Failed tab to retry them."
-                  />
-                ) : (
-                  leads.map((l, i) => {
-                    const st = leadState(l)
-                    if (isFailedLead(l)) return null
-                    const d = draftsByLead[i]
-                    const subject = cardSubject(l, d?.subject || l._subject, st)
-                    const to = d?.to || l._to
-                    const snip = snippet(d?.html || l._preview_html)
-                    return (
-                      <div
-                        key={i}
-                        role="button"
-                        tabIndex={0}
-                        aria-current={i === currentIndex ? 'true' : undefined}
-                        className={`mail-card${i === currentIndex ? ' active' : ''}${st === 'sent' || st === 'skipped' ? ' dim' : ''}`}
-                        onClick={() => selectLead(i)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            selectLead(i)
-                          }
-                        }}
-                      >
-                        <span className="mail-card-check" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={st === 'queued'}
-                            disabled={!d || (st !== 'ready' && st !== 'queued')}
-                            onChange={() => queueLead(i, st !== 'queued')}
-                            aria-label={`Add ${leadTitle(l, `lead ${i + 1}`)} to bulk send`}
-                            title="Add to bulk send"
-                          />
-                        </span>
-                        <span className="mail-card-body">
-                          <span className="mail-card-top">
-                            <strong>{leadTitle(l, `Lead ${i + 1}`)}</strong>
-                            <span className={`badge ${badgeClass(st)}`}>
-                              {st === 'processing' ? <Spinner size="sm" /> : null}
-                              {stateLabel(l)}
-                            </span>
-                          </span>
-                          <span className="mail-card-subject">{subject}</span>
-                          <span className="mail-card-meta">
-                            {to ? `To ${to}` : l.website || 'No recipient yet'}
-                            {snip ? ` · ${snip}` : ''}
+            <div className="board-list-items">
+              {reviewable === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<ErrorCircleRegular />}
+                  title="No emails to review"
+                  description="Every lead failed. Check the Failed tab to retry them."
+                />
+              ) : (
+                leads.map((l, i) => {
+                  const st = leadState(l)
+                  if (isFailedLead(l)) return null
+                  const d = draftsByLead[i]
+                  const subject = cardSubject(l, d?.subject || l._subject, st)
+                  const to = d?.to || l._to
+                  const snip = snippet(d?.html || l._preview_html)
+                  return (
+                    <div
+                      key={i}
+                      role="button"
+                      tabIndex={0}
+                      aria-current={i === currentIndex ? 'true' : undefined}
+                      className={`mail-card${i === currentIndex ? ' active' : ''}${st === 'sent' || st === 'skipped' ? ' dim' : ''}`}
+                      onClick={() => selectLead(i)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          selectLead(i)
+                        }
+                      }}
+                    >
+                      <span className="mail-card-check" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={st === 'queued'}
+                          disabled={!d || (st !== 'ready' && st !== 'queued')}
+                          onChange={() => queueLead(i, st !== 'queued')}
+                          aria-label={`Add ${leadTitle(l, `lead ${i + 1}`)} to bulk send`}
+                          title="Add to bulk send"
+                        />
+                      </span>
+                      <span className="mail-card-body">
+                        <span className="mail-card-top">
+                          <strong>{leadTitle(l, `Lead ${i + 1}`)}</strong>
+                          <span className={`badge ${badgeClass(st)}`}>
+                            {st === 'processing' ? <Spinner size="sm" /> : null}
+                            {stateLabel(l)}
                           </span>
                         </span>
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </>
+                        <span className="mail-card-subject">{subject}</span>
+                        <span className="mail-card-meta">{snip || (to ? `To ${to}` : l.website || 'Waiting…')}</span>
+                      </span>
+                    </div>
+                  )
+                })
+              )}
+            </div>
           ) : (
             <>
               <div className="board-list-head">
                 <span>Retry finds a working website, then writes the email.</span>
-                <button
-                  className="btn subtle sm"
-                  type="button"
-                  disabled={!counts.failed || bulkSending}
-                  onClick={() => void retryFailed()}
-                >
+                <button className="btn subtle sm" type="button" disabled={!counts.failed || bulkSending} onClick={() => void retryFailed()}>
                   <ArrowClockwiseRegular /> Retry all
                 </button>
               </div>
@@ -484,20 +500,12 @@ export function CampaignReviewPage() {
                           <span className="mail-card-subject" style={{ color: retrying ? undefined : 'var(--danger-fg)' }}>
                             {retrying ? cleanStatus(l._status) || 'Looking up website…' : err || 'Could not generate'}
                           </span>
-                          <span className="mail-card-meta">
-                            {l._failed_website || l.website || 'No website'}
-                            {l.company || l.name ? ` · ${l.company || l.name}` : ''}
-                          </span>
+                          <span className="mail-card-meta">{l._failed_website || l.website || 'No website'}</span>
                         </span>
                         {retrying ? (
                           <Spinner size="sm" />
                         ) : (
-                          <button
-                            className="btn secondary sm"
-                            type="button"
-                            disabled={acting}
-                            onClick={() => void retryLead(i)}
-                          >
+                          <button className="btn secondary sm" type="button" disabled={acting} onClick={() => void retryLead(i)}>
                             <ArrowClockwiseRegular /> Retry
                           </button>
                         )}
@@ -510,69 +518,28 @@ export function CampaignReviewPage() {
           )}
         </aside>
 
-        <div className="board-reader">
-          <section className="card reader-main">
-            <CardHeader
-              title={leadTitle(focusDraft || focus, `Lead ${currentIndex + 1}`)}
-              subtitle={
-                focusDraft?.to || focus?._to
-                  ? `To ${focusDraft?.to || focus?._to}${
-                      focusDraft?.website || focus?.website
-                        ? ` · ${(focusDraft?.website || focus?.website || '').replace(/^https?:\/\//, '')}`
-                        : ''
-                    }`
-                  : undefined
-              }
-              actions={focus ? <span className={`badge ${badgeClass(focusState)}`}>{stateLabel(focus)}</span> : null}
-            />
-
-            {previewHtml && !focusFailed ? (
-              <div className="reader-preview">
-                <EmailPreviewFrame html={previewHtml} subject={previewSubject} fromLabel={fromLabel} fullscreen deviceToggle />
+        <section className="card flush reader">
+          <div className="reader-head">
+            <Avatar name={focusName} size={40} />
+            <div className="reader-head-copy">
+              <div className="row nowrap" style={{ gap: 8 }}>
+                <strong className="truncate">{focusName}</strong>
+                {focus ? <span className={`badge ${badgeClass(focusState)}`}>{stateLabel(focus)}</span> : null}
               </div>
-            ) : (
-              <div className="preview-empty">
-                {focusState === 'processing' && !focusFailed ? <Spinner size="lg" /> : <MailRegular className="preview-empty-icon" />}
-                <strong>
-                  {focusFailed
-                    ? 'Select an email to preview'
-                    : focusState === 'processing'
-                      ? `Writing email ${currentIndex + 1} of ${counts.total}…`
-                      : focusState === 'skipped'
-                        ? 'This email was discarded'
-                        : focusState === 'sent'
-                          ? 'This email was sent'
-                          : 'The preview appears when the draft is ready'}
-                </strong>
-                <p>
-                  {focusFailed
-                    ? 'Failed leads are listed in the Failed tab.'
-                    : focusState === 'processing'
-                      ? 'This lead is being researched and written. You can review other emails meanwhile.'
-                      : 'Pick any ready email from the list to preview, send or add it to bulk.'}
-                </p>
-              </div>
-            )}
-
+              <span className="muted text-sm truncate">
+                {focusTo ? `To ${focusTo}` : 'No recipient yet'}
+                {focusSite ? ` · ${focusSite}` : ''}
+              </span>
+            </div>
             {focusFailed ? null : (
-              <div className="reader-actions">
-                <button
-                  className="btn danger-outline"
-                  type="button"
-                  disabled={!canAct || acting}
-                  onClick={() => {
-                    setAdvanceFrom(currentIndex)
-                    void discardLead(currentIndex)
-                  }}
-                >
+              <div className="reader-head-actions">
+                <button className="btn subtle" type="button" disabled={!canAct || acting} onClick={() => {
+                  setAdvanceFrom(currentIndex)
+                  void discardLead(currentIndex)
+                }}>
                   <DeleteRegular /> Discard
                 </button>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  disabled={!canAct || acting}
-                  onClick={() => queueLead(currentIndex)}
-                >
+                <button className="btn secondary" type="button" disabled={!canAct || acting} onClick={() => queueLead(currentIndex)}>
                   {focusState === 'queued' ? <TaskListSquareLtrRegular /> : <TaskListAddRegular />}
                   {focusState === 'queued' ? 'Remove from bulk' : 'Add to bulk'}
                 </button>
@@ -585,11 +552,38 @@ export function CampaignReviewPage() {
                 </button>
               </div>
             )}
-          </section>
+          </div>
 
-          <aside className="card" style={{ position: 'sticky', top: 'calc(var(--topbar-h) + 20px)' }}>
-            <CardHeader icon={<SparkleRegular />} title="Ask for changes" subtitle="Edits apply to this email only." />
-            <div className="stack" style={{ marginTop: 12 }}>
+          {previewHtml && !focusFailed ? (
+            <div className="reader-preview">
+              <EmailPreviewFrame html={previewHtml} subject={previewSubject} fromLabel={fromLabel} fullscreen deviceToggle />
+            </div>
+          ) : (
+            <div className="preview-empty">
+              {focusState === 'processing' && !focusFailed ? <Spinner size="lg" /> : <MailRegular className="preview-empty-icon" />}
+              <strong>
+                {focusFailed
+                  ? 'Select an email to preview'
+                  : focusState === 'processing'
+                    ? `Writing email ${currentIndex + 1} of ${counts.total}…`
+                    : focusState === 'skipped'
+                      ? 'This email was discarded'
+                      : focusState === 'sent'
+                        ? 'This email was sent'
+                        : 'The preview appears when the draft is ready'}
+              </strong>
+              <p>
+                {focusFailed
+                  ? 'Failed leads are listed in the Failed tab.'
+                  : focusState === 'processing'
+                    ? 'This lead is being researched and written. You can review other emails meanwhile.'
+                    : 'Pick any ready email from the list to preview, send or add it to bulk.'}
+              </p>
+            </div>
+          )}
+
+          {focusFailed ? null : (
+            <div className="reader-chat">
               {chat.length || revising ? (
                 <div className="chat-log">
                   {chat.map((m, i) => (
@@ -600,31 +594,24 @@ export function CampaignReviewPage() {
                   {revising ? <div className="chat-bubble assistant"><Spinner size="sm" label="Updating…" /></div> : null}
                   <div ref={chatEnd} />
                 </div>
-              ) : (
-                <p className="muted text-sm">For example: “Shorter, more direct opening” or “Make the call to action softer”.</p>
-              )}
+              ) : null}
               <form className="chat-compose" onSubmit={onChat}>
+                <SparkleRegular className="reader-chat-icon" />
                 <input
                   className="input"
-                  placeholder={focusDraft ? 'Describe a change' : 'Waiting for the draft…'}
+                  placeholder={focusDraft ? 'Ask for a change to this email, e.g. “Shorter, warmer opening”' : 'Waiting for the draft…'}
                   aria-label="Describe a change to this email"
                   value={input}
                   disabled={!focusDraft || acting || !canAct}
                   onChange={(e) => setInput(e.target.value)}
                 />
-                <button
-                  className="btn secondary icon-only"
-                  type="submit"
-                  aria-label="Update email"
-                  title="Update email"
-                  disabled={!focusDraft || acting || !canAct || !input.trim()}
-                >
-                  <SendRegular />
+                <button className="btn secondary" type="submit" disabled={!focusDraft || acting || !canAct || !input.trim()}>
+                  Update
                 </button>
               </form>
             </div>
-          </aside>
-        </div>
+          )}
+        </section>
       </div>
     </div>
   )

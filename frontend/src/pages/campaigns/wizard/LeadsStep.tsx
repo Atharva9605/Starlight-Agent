@@ -6,11 +6,37 @@ import {
   GlobeSearchRegular,
   MailRegular,
   SearchRegular,
+  ArrowDownloadRegular,
+  PersonRegular,
 } from '@fluentui/react-icons'
 import { Dropzone } from '../../../components/Dropzone'
 import { useCampaign } from '../../../campaign/CampaignContext'
-import { CardHeader, MessageBar } from '../../../components/ui'
+import { MessageBar } from '../../../components/ui'
 import { WizardNav } from './CampaignWizard'
+
+const SAMPLE_COLUMNS = [
+  { name: 'company', need: 'Required*' },
+  { name: 'website', need: 'Required*' },
+  { name: 'email', need: 'Recommended' },
+  { name: 'contact_name', need: 'Optional' },
+]
+
+const SAMPLE_ROWS = [
+  ['Studio Lotus', 'studiolotus.in', 'info@studiolotus.in', 'Ankur Choksi'],
+  ['Morphogenesis', '', 'contact@morphogenesis.org', ''],
+  ['Abin Design Studio', 'abindesignstudio.com', '', 'Abin Chaudhuri'],
+]
+
+/** A ready-to-fill CSV with the right column names. */
+function downloadSample() {
+  const csv = [SAMPLE_COLUMNS.map((c) => c.name), ...SAMPLE_ROWS].map((r) => r.join(',')).join('\r\n')
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'starlight-leads-sample.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 function leadEmail(l: Record<string, any>): string {
   for (const [k, v] of Object.entries(l)) {
@@ -53,36 +79,54 @@ export function LeadsStep() {
   return (
     <>
       {!leads.length ? (
-        <div className="wizard-body">
-          <section className="card">
-            <CardHeader title="Upload your lead list" subtitle="An Excel or CSV file, one company per row." />
-            <div className="stack" style={{ marginTop: 16 }}>
-              <Dropzone accept=".xlsx,.xls,.csv" busy={busy} title="Drop your lead sheet here" hint="XLSX, XLS or CSV" onFiles={onFiles} />
-              {error ? (
-                <MessageBar intent="error" title="Couldn't read that file" onDismiss={() => setError('')}>
-                  {error}
-                </MessageBar>
-              ) : null}
+        <section className="card upload-card">
+          <Dropzone
+            accept=".xlsx,.xls,.csv"
+            busy={busy}
+            title={busy ? 'Reading your sheet…' : 'Drop your lead sheet here'}
+            hint="Excel or CSV, one company per row"
+            onFiles={onFiles}
+          />
+          {error ? (
+            <MessageBar intent="error" title="Couldn't read that file" onDismiss={() => setError('')}>
+              {error}
+            </MessageBar>
+          ) : null}
+
+          <div className="sheet-guide">
+            <div className="sheet-guide-head">
+              <div>
+                <strong>Your sheet should look like this</strong>
+                <span className="muted text-sm">* Either company or website is enough. Column names matter; order doesn't, and extra columns are ignored.</span>
+              </div>
+              <button type="button" className="btn secondary sm" onClick={downloadSample}>
+                <ArrowDownloadRegular /> Download sample sheet
+              </button>
             </div>
-          </section>
-          <aside className="card wizard-aside">
-            <CardHeader title="What the sheet needs" />
-            <ul className="column-guide">
-              <li>
-                <code className="inline">website</code> or <code className="inline">company</code>
-                <span>At least one. Rows with only a company name get their website looked up.</span>
-              </li>
-              <li>
-                <code className="inline">email</code>
-                <span>Who receives the email. Without it, an address from their website is used.</span>
-              </li>
-              <li>
-                <code className="inline">contact_name</code>
-                <span>Optional. Lets the email greet a person: “Dear Priya,”.</span>
-              </li>
+            <div className="sheet-sample" role="table" aria-label="Example lead sheet">
+              <div className="sheet-row head" role="row">
+                {SAMPLE_COLUMNS.map((c) => (
+                  <span key={c.name} role="columnheader">
+                    <code>{c.name}</code>
+                    <em className={c.need === 'Optional' ? '' : 'need'}>{c.need}</em>
+                  </span>
+                ))}
+              </div>
+              {SAMPLE_ROWS.map((r, i) => (
+                <div key={i} className="sheet-row" role="row">
+                  {r.map((v, j) => (
+                    <span key={j} role="cell" className={v ? '' : 'empty'}>{v || 'empty'}</span>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <ul className="sheet-notes">
+              <li><GlobeSearchRegular /> No website? We look it up from the company name.</li>
+              <li><MailRegular /> No email? We use the contact address on their website.</li>
+              <li><PersonRegular /> A contact name makes the email open with “Dear Priya,”.</li>
             </ul>
-          </aside>
-        </div>
+          </div>
+        </section>
       ) : (
         <section className="card flush">
           <div className="card-section">
@@ -167,7 +211,7 @@ export function LeadsStep() {
         </section>
       )}
 
-      <WizardNav step={0} canNext={leads.length > 0} nextHint={leads.length ? `${leads.length} lead${leads.length === 1 ? '' : 's'}` : 'Upload a sheet to continue'} />
+      {leads.length ? <WizardNav step={0} nextHint={`${leads.length} lead${leads.length === 1 ? '' : 's'} ready`} /> : null}
     </>
   )
 }
