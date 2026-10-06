@@ -915,6 +915,7 @@ a.kpi:hover { box-shadow: var(--shadow-8); }
 .email-chrome-from strong { color: var(--fg-1); font-weight: 600; }
 .email-chrome-frame { flex: 1; min-height: 0; display: flex; justify-content: center; background: var(--bg-3); }
 .email-chrome-frame iframe { width: 100%; border: 0; background: #fff; display: block; transition: max-width 200ms var(--curve); }
+.email-chrome.fullscreen .email-chrome-frame iframe { align-self: stretch; height: auto; min-height: 420px; }
 .email-chrome-frame.mobile { padding: 16px 0; }
 .email-chrome-frame.mobile iframe { max-width: 390px; border-radius: var(--radius-xl); box-shadow: var(--shadow-8); }
 

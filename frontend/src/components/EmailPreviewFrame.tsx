@@ -31,7 +31,7 @@ export function EmailPreviewFrame({
       ? html
       : `<html><body style="font-family:'Segoe UI',Arial,sans-serif;font-size:14px;line-height:1.5;padding:16px;color:#242424;white-space:pre-wrap;margin:0">${escapeHtml(text || '')}</body></html>`
 
-  const height = fullscreen ? '100%' : compact ? 180 : 300
+  const height = compact ? 180 : 300
 
   return (
     <div className={`email-chrome${fullscreen ? ' fullscreen' : ''}${bare ? ' bare' : ''}`}>
@@ -73,7 +73,7 @@ export function EmailPreviewFrame({
           title={subject ? `Email preview: ${subject}` : 'Email preview'}
           sandbox=""
           srcDoc={doc}
-          style={{ height, minHeight: fullscreen ? 0 : height }}
+          style={fullscreen ? undefined : { height, minHeight: height }}
         />
       </div>
     </div>
