@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
+import {
+  DismissRegular,
+  DocumentSearchRegular,
+  ErrorCircleRegular,
+  OpenRegular,
+  SearchRegular,
+} from '@fluentui/react-icons'
 import { api } from '../api/client'
+import { EmptyState, Spinner, useDocumentTitle } from '../components/ui'
 import {
   cleanCatalogueTitle,
   toDisplayProduct,
@@ -65,7 +73,7 @@ function ProductCard({
         <h2 className="pc-title">{product.name}</h2>
 
         {highlight.length ? (
-          <dl className="pc-specs pc-specs-card">
+          <dl className="pc-specs">
             {highlight.map((s) => (
               <div key={s.key} className="pc-spec">
                 <dt>{s.label}</dt>
@@ -109,8 +117,8 @@ function ProductModal({
     <div className="pc-modal" role="dialog" aria-modal="true" aria-label={product.name}>
       <button type="button" className="pc-modal-backdrop" aria-label="Close" onClick={onClose} />
       <div className="pc-modal-panel">
-        <button type="button" className="pc-modal-close" onClick={onClose}>
-          Close
+        <button type="button" className="btn subtle icon-only pc-modal-close" aria-label="Close" title="Close" onClick={onClose}>
+          <DismissRegular />
         </button>
 
         {product.imageUrl ? (
@@ -164,8 +172,8 @@ function ProductModal({
           ) : null}
 
           {product.imageUrl ? (
-            <a className="pc-btn" href={product.imageUrl} target="_blank" rel="noreferrer">
-              Open full catalogue page
+            <a className="btn" href={product.imageUrl} target="_blank" rel="noreferrer">
+              <OpenRegular /> Open full catalogue page
               {product.pageNumber ? ` (p. ${product.pageNumber})` : ''}
             </a>
           ) : null}
@@ -187,6 +195,7 @@ export function PublicCataloguePage() {
     enabled: Boolean(orgSlug && catalogueSlug),
     retry: false,
   })
+  useDocumentTitle(q.data ? cleanCatalogueTitle(q.data.name) : 'Digital catalogue')
 
   const displayProducts = useMemo(
     () => (q.data?.products || []).map(toDisplayProduct),
@@ -218,8 +227,8 @@ export function PublicCataloguePage() {
   if (q.isLoading) {
     return (
       <div className="pc-page">
-        <div className="pc-shell">
-          <p className="pc-status">Loading catalogue…</p>
+        <div className="pc-shell center-fill" style={{ minHeight: '60vh' }}>
+          <Spinner size="lg" label="Loading catalogue…" />
         </div>
       </div>
     )
@@ -228,9 +237,12 @@ export function PublicCataloguePage() {
   if (q.isError || !q.data) {
     return (
       <div className="pc-page">
-        <div className="pc-shell">
-          <h1 className="pc-error-title">Catalogue unavailable</h1>
-          <p className="pc-status">{(q.error as Error)?.message || 'Not found'}</p>
+        <div className="pc-shell center-fill" style={{ minHeight: '60vh' }}>
+          <EmptyState
+            icon={<ErrorCircleRegular />}
+            title="Catalogue unavailable"
+            description={(q.error as Error)?.message || 'This catalogue link may have expired or been turned off.'}
+          />
         </div>
       </div>
     )
@@ -260,15 +272,17 @@ export function PublicCataloguePage() {
 
       <div className="pc-shell">
         <div className="pc-toolbar">
-          <label className="pc-search">
-            <span className="sr-only">Search products</span>
+          <div className="input-wrap pc-search">
+            <SearchRegular />
             <input
+              className="input"
               type="search"
+              aria-label="Search products"
               placeholder="Search name, code, wattage…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-          </label>
+          </div>
           {categories.length ? (
             <div className="pc-filters" role="tablist" aria-label="Categories">
               {categories.map((c) => (
@@ -288,10 +302,11 @@ export function PublicCataloguePage() {
         </div>
 
         {!products.length ? (
-          <div className="pc-empty">
-            <strong>No matching products</strong>
-            <p>Try another search or category.</p>
-          </div>
+          <EmptyState
+            icon={<DocumentSearchRegular />}
+            title="No matching products"
+            description="Try another search or category."
+          />
         ) : (
           <div className="pc-grid">
             {products.map((p) => (

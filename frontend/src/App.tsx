@@ -21,6 +21,8 @@ import { AiCreateTemplatePage } from './pages/AiCreateTemplatePage'
 import { RagLabPage } from './pages/RagLabPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UsersPage } from './pages/UsersPage'
+import { NotFoundPage } from './pages/NotFoundPage'
+import { UiProvider } from './components/ui'
 import type { ReactNode } from 'react'
 
 const qc = new QueryClient()
@@ -35,6 +37,7 @@ export default function App() {
   return (
     <QueryClientProvider client={qc}>
       <AuthProvider>
+        <UiProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -72,9 +75,11 @@ export default function App() {
               <Route path="prompts" element={<Navigate to="/admin/prompts" replace />} />
               <Route path="templates" element={<Navigate to="/admin/templates" replace />} />
               <Route path="templates/create" element={<Navigate to="/admin/templates/create" replace />} />
+              <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Routes>
         </BrowserRouter>
+        </UiProvider>
       </AuthProvider>
     </QueryClientProvider>
   )

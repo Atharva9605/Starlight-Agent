@@ -1,147 +1,91 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate } from 'react-router-dom'
+import {
+  CheckmarkCircleFilled,
+  DismissRegular,
+  PeopleRegular,
+  PersonAddRegular,
+  SearchRegular,
+} from '@fluentui/react-icons'
 import { api, type OrgMember } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { Avatar, EmptyState, MessageBar, PageHeader, Spinner, useToast } from '../components/ui'
 
 const ROLE_OPTIONS = [
-  { value: 'member', label: 'Member', blurb: 'Inbox, campaigns, catalogues' },
-  { value: 'admin', label: 'Admin', blurb: 'Everything members can do, plus users & admin tools' },
+  { value: 'member', label: 'Member', blurb: 'Inbox, campaigns and catalogues' },
+  { value: 'admin', label: 'Admin', blurb: 'Everything members can do, plus users and admin tools' },
 ]
 
-function rolePill(role: string) {
-  if (role === 'owner') return 'ok'
-  if (role === 'admin') return 'warn'
+function roleBadge(role: string) {
+  if (role === 'owner') return 'purple'
+  if (role === 'admin') return 'brand'
   return ''
 }
 
-export function UsersPage() {
-  const { me } = useAuth()
+function AddUserDrawer({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
-  const canManage = me?.role === 'owner' || me?.role === 'admin'
-
+  const toast = useToast()
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('member')
-  const [formMsg, setFormMsg] = useState('')
+  const [error, setError] = useState('')
 
-  const members = useQuery({
-    queryKey: ['org-members'],
-    queryFn: api.orgMembers,
-    enabled: canManage,
-  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const add = useMutation({
-    mutationFn: (body: {
-      email: string
-      password?: string
-      name?: string
-      role?: string
-    }) => api.addOrgMember(body),
+    mutationFn: (body: { email: string; password?: string; name?: string; role?: string }) =>
+      api.addOrgMember(body),
     onSuccess: (res) => {
       const m = res.member
-      setFormMsg(
+      toast.success(
+        m.created ? 'User added' : m.action === 'role_updated' ? 'Role updated' : 'User added',
         m.created
-          ? `Created ${m.email} and added as ${m.role}`
+          ? `Created ${m.email} as ${m.role}.`
           : m.action === 'role_updated'
-            ? `Updated ${m.email} to ${m.role}`
-            : `Added ${m.email} as ${m.role}`,
+            ? `${m.email} is now ${m.role}.`
+            : `${m.email} joined as ${m.role}.`,
       )
-      setEmail('')
-      setName('')
-      setPassword('')
-      setRole('member')
       qc.invalidateQueries({ queryKey: ['org-members'] })
+      onClose()
     },
-    onError: (e: Error) => setFormMsg(e.message),
+    onError: (e: Error) => setError(e.message),
   })
-
-  if (!canManage) {
-    return <Navigate to="/" replace />
-  }
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
-    setFormMsg('')
+    setError('')
     add.mutate({ email, name, password, role })
   }
 
-  const list = members.data?.members || []
-
   return (
-    <div>
-      <div className="page-hero">
-        <div>
-          <h1>Users</h1>
-          <p>People who can sign in to this Starlight workspace.</p>
+    <div className="drawer-layer">
+      <div className="drawer-backdrop" onClick={onClose} />
+      <form className="drawer" role="dialog" aria-modal="true" aria-labelledby="add-user-title" onSubmit={onSubmit}>
+        <div className="drawer-head">
+          <h2 id="add-user-title">Add a user</h2>
+          <button type="button" className="btn subtle icon-only" aria-label="Close" onClick={onClose}>
+            <DismissRegular />
+          </button>
         </div>
-        <span className="pill">{list.length} {list.length === 1 ? 'user' : 'users'}</span>
-      </div>
-
-      <div className="panel stack" style={{ marginBottom: '1rem' }}>
-        <strong style={{ fontFamily: 'var(--display)' }}>Team</strong>
-        {members.isLoading ? <div className="muted">Loading…</div> : null}
-        {members.isError ? (
-          <div className="alert danger">{(members.error as Error).message}</div>
-        ) : null}
-        {!members.isLoading && list.length === 0 ? (
-          <div className="empty-state" style={{ padding: '1.25rem 0.5rem', textAlign: 'center' }}>
-            <strong>No members yet</strong>
-            <p className="muted" style={{ margin: '0.35rem 0 0' }}>Add someone with the form below.</p>
-          </div>
-        ) : null}
-        {list.length ? (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((m: OrgMember) => {
-                  const initial = (m.name || m.email).trim().charAt(0).toUpperCase()
-                  return (
-                    <tr key={m.id}>
-                      <td>
-                        <div className="row" style={{ gap: 10, flexWrap: 'nowrap' }}>
-                          <div className="avatar" style={{ width: 32, height: 32, fontSize: 13, flexShrink: 0 }}>
-                            {initial}
-                          </div>
-                          <span style={{ fontWeight: 650 }}>{m.name || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="muted">{m.email}</td>
-                      <td>
-                        <span className={`pill ${rolePill(m.role)}`}>{m.role}</span>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </div>
-
-      <form className="panel stack" onSubmit={onSubmit} style={{ maxWidth: 640 }}>
-        <div>
-          <strong style={{ fontFamily: 'var(--display)', fontSize: '1.15rem' }}>Add a user</strong>
-          <p className="muted" style={{ margin: '0.3rem 0 0', fontSize: 13.5 }}>
-            They can sign in immediately with the password you set. Share it out of band.
+        <div className="drawer-body">
+          <p className="muted">
+            They can sign in straight away with the password you set. Share it with them privately.
           </p>
-        </div>
-
-        <div className="grid-2" style={{ gap: '0.75rem' }}>
           <label className="field">
-            <span>Email</span>
+            <span>Email <span className="req" style={{ color: 'var(--danger-fg)' }}>*</span></span>
             <input
               className="input"
               type="email"
               required
+              autoFocus
               autoComplete="off"
               placeholder="colleague@starlightlinearled.com"
               value={email}
@@ -158,55 +102,182 @@ export function UsersPage() {
               onChange={(e) => setName(e.target.value)}
             />
           </label>
+          <label className="field">
+            <span>Temporary password <span style={{ color: 'var(--danger-fg)' }}>*</span></span>
+            <input
+              className="input"
+              type="text"
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={8}
+              required
+            />
+            <span className="field-hint">Required for new accounts. Ignored if this email already has an account.</span>
+          </label>
+          <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+            <legend className="field-label" style={{ marginBottom: 6 }}>Role</legend>
+            <div className="stack tight" role="radiogroup">
+              {ROLE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={role === opt.value}
+                  className={`choice-card${role === opt.value ? ' selected' : ''}`}
+                  onClick={() => setRole(opt.value)}
+                >
+                  <span className="choice-card-copy">
+                    <strong>{opt.label}</strong>
+                    <span>{opt.blurb}</span>
+                  </span>
+                  {role === opt.value ? (
+                    <CheckmarkCircleFilled className="choice-card-check" />
+                  ) : (
+                    <span className="choice-card-ring" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          {error ? <MessageBar intent="error" title="Couldn't add user">{error}</MessageBar> : null}
         </div>
-
-        <label className="field">
-          <span>Temporary password</span>
-          <input
-            className="input"
-            type="text"
-            autoComplete="new-password"
-            placeholder="At least 8 characters"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            minLength={8}
-            required
-          />
-          <span className="muted" style={{ fontSize: 12 }}>
-            Required for new accounts. Ignored if this email already exists.
-          </span>
-        </label>
-
-        <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
-          <span>Role</span>
-          <div className="grid-2" style={{ gap: 8, marginTop: 6 }}>
-            {ROLE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                className={`role-option${role === opt.value ? ' selected' : ''}`}
-                onClick={() => setRole(opt.value)}
-              >
-                <span>
-                  <strong>{opt.label}</strong>
-                  <span className="muted" style={{ display: 'block' }}>{opt.blurb}</span>
-                </span>
-                <span className="role-check">{role === opt.value ? '✓' : ''}</span>
-              </button>
-            ))}
-          </div>
-        </fieldset>
-
-        {formMsg ? (
-          <div className={`alert ${add.isError ? 'danger' : 'warn'}`}>{formMsg}</div>
-        ) : null}
-
-        <div className="row">
+        <div className="drawer-foot">
           <button className="btn" type="submit" disabled={add.isPending}>
+            {add.isPending ? <Spinner size="sm" /> : <PersonAddRegular />}
             {add.isPending ? 'Adding…' : 'Add user'}
+          </button>
+          <button className="btn secondary" type="button" onClick={onClose}>
+            Cancel
           </button>
         </div>
       </form>
+    </div>
+  )
+}
+
+export function UsersPage() {
+  const { me } = useAuth()
+  const canManage = me?.role === 'owner' || me?.role === 'admin'
+  const [adding, setAdding] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const members = useQuery({
+    queryKey: ['org-members'],
+    queryFn: api.orgMembers,
+    enabled: canManage,
+  })
+
+  const list = members.data?.members || []
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase()
+    if (!term) return list
+    return list.filter((m: OrgMember) => `${m.name || ''} ${m.email} ${m.role}`.toLowerCase().includes(term))
+  }, [list, search])
+
+  if (!canManage) {
+    return <Navigate to="/" replace />
+  }
+
+  return (
+    <div>
+      <PageHeader
+        breadcrumb={[{ label: 'Admin' }, { label: 'Users' }]}
+        title="Users"
+        subtitle="People who can sign in to this Starlight workspace."
+        actions={
+          <button className="btn" type="button" onClick={() => setAdding(true)}>
+            <PersonAddRegular /> Add user
+          </button>
+        }
+      />
+
+      {members.isError ? (
+        <div className="page-alerts">
+          <MessageBar intent="error" title="Couldn't load users">{(members.error as Error).message}</MessageBar>
+        </div>
+      ) : null}
+
+      <section className="card flush">
+        <div className="card-section row between">
+          <div className="row" style={{ gap: 8 }}>
+            <strong>Team</strong>
+            <span className="badge">{list.length} {list.length === 1 ? 'user' : 'users'}</span>
+          </div>
+          <div className="input-wrap" style={{ width: 'min(280px, 100%)' }}>
+            <SearchRegular />
+            <input
+              className="input"
+              type="search"
+              placeholder="Search users"
+              aria-label="Search users"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {members.isLoading ? (
+          <div className="center-fill" style={{ minHeight: 160 }}>
+            <Spinner label="Loading users…" />
+          </div>
+        ) : list.length === 0 ? (
+          <EmptyState
+            icon={<PeopleRegular />}
+            title="No users yet"
+            description="Add teammates so they can review replies and run campaigns."
+            actions={
+              <button className="btn" type="button" onClick={() => setAdding(true)}>
+                <PersonAddRegular /> Add user
+              </button>
+            }
+          />
+        ) : (
+          <div className="table-wrap" style={{ borderTop: '1px solid var(--stroke-2)' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((m: OrgMember) => (
+                  <tr key={m.id}>
+                    <td>
+                      <div className="cell-primary">
+                        <Avatar name={m.name || m.email} size={32} />
+                        <div style={{ minWidth: 0 }}>
+                          <strong className="truncate" style={{ display: 'block' }}>
+                            {m.name || m.email.split('@')[0]}
+                            {m.email === me?.email ? <span className="muted" style={{ fontWeight: 400 }}> (you)</span> : null}
+                          </strong>
+                          <span className="cell-sub truncate">{m.email}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`badge ${roleBadge(m.role)}`} style={{ textTransform: 'capitalize' }}>
+                        {m.role}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {visible.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="muted" style={{ textAlign: 'center' }}>
+                      No users match “{search}”
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {adding ? <AddUserDrawer onClose={() => setAdding(false)} /> : null}
     </div>
   )
 }

@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import {
+  DeleteRegular,
+  LockClosedRegular,
+  PaintBrushRegular,
+  SaveRegular,
+  WandRegular,
+} from '@fluentui/react-icons'
 import { api } from '../api/client'
 import { EmailPreviewFrame } from '../components/EmailPreviewFrame'
+import { CardHeader, MessageBar, PageHeader, Spinner, useConfirm, useToast } from '../components/ui'
 
 type TemplateMeta = {
   name: string
@@ -29,6 +37,8 @@ function displayLabel(t: TemplateMeta): string {
 
 /** Admin page — pick, preview, and save email HTML templates. */
 export function TemplatesPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const [searchParams] = useSearchParams()
   const preferSelected = searchParams.get('selected') || ''
 
@@ -36,7 +46,6 @@ export function TemplatesPage() {
   const [selected, setSelected] = useState('')
   const [content, setContent] = useState('')
   const [previewHtml, setPreviewHtml] = useState('')
-  const [msg, setMsg] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [previewing, setPreviewing] = useState(false)
@@ -113,7 +122,7 @@ export function TemplatesPage() {
       const res = await api.saveTemplate(finalName, content, saveLabel.trim() || undefined)
       await refreshList(res.name || finalName)
       setSelected(res.name || finalName)
-      setMsg(`Saved as ${res.label || finalName}`)
+      toast.success('Template saved', res.label || finalName)
     } catch (e: any) {
       setError(e.message || 'Save failed')
     } finally {
@@ -127,12 +136,18 @@ export function TemplatesPage() {
       setError('Built-in templates cannot be deleted. Save a custom copy first.')
       return
     }
-    if (!window.confirm(`Delete custom template “${displayLabel(meta)}”?`)) return
+    const ok = await confirm({
+      title: 'Delete this template?',
+      body: `“${displayLabel(meta)}” will be removed. Campaigns that use it will fall back to the default design.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
     setBusy(true)
     try {
       await api.deleteTemplate(selected)
       await refreshList()
-      setMsg('Template deleted')
+      toast.info('Template deleted')
     } catch (e: any) {
       setError(e.message || 'Delete failed')
     } finally {
@@ -143,88 +158,93 @@ export function TemplatesPage() {
   const current = templates.find((t) => t.name === selected)
 
   return (
-    <div className="design-screen">
-      <div className="page-hero">
-        <div>
-          <h1>Email Design</h1>
-          <p>Preview how customers see the email — pick a saved template or create a new one with AI.</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Link to="/admin/templates/create" className="btn secondary">
-            Create with AI
-          </Link>
-          <button className="btn" type="button" disabled={busy} onClick={save}>
-            Save template
-          </button>
-        </div>
-      </div>
-
-      <div className="design-body">
-        <div className="design-mail">
-          <div className="design-preview-label muted">
-            Customer preview{previewing ? ' · refreshing…' : ''}
-          </div>
-          <EmailPreviewFrame
-            html={previewHtml || content}
-            subject="Sample Starlight email"
-            fullscreen
-          />
-        </div>
-
-        <aside className="design-side panel stack">
-          <strong style={{ fontFamily: 'var(--display)' }}>Template</strong>
-          <label className="field">
-            <span>Choose design</span>
-            <select
-              className="select"
-              value={selected}
-              disabled={busy}
-              onChange={(e) => setSelected(e.target.value)}
-            >
-              {templates.map((t) => (
-                <option key={t.name} value={t.name}>
-                  {displayLabel(t)}
-                  {t.is_custom ? ' · custom' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>Display label</span>
-            <input
-              className="input"
-              value={saveLabel}
-              disabled={busy}
-              onChange={(e) => setSaveLabel(e.target.value)}
-              placeholder="My design"
-            />
-          </label>
-          <label className="field">
-            <span>Save as filename</span>
-            <input
-              className="input"
-              value={saveName}
-              disabled={busy}
-              onChange={(e) => setSaveName(e.target.value)}
-              placeholder="email_template_my_design.html"
-            />
-          </label>
-          {msg ? <span className="pill ok">{msg}</span> : null}
-          {error ? (
-            <div className="alert danger">
-              <strong>Template error</strong>
-              <div style={{ marginTop: 4 }}>{error}</div>
-            </div>
-          ) : null}
-          {current?.is_custom ? (
-            <button className="btn danger" type="button" disabled={busy} onClick={remove}>
-              Delete custom
+    <div>
+      <PageHeader
+        breadcrumb={[{ label: 'Admin' }, { label: 'Email design' }]}
+        title="Email design"
+        subtitle="Preview exactly what customers see — pick a saved template or create a new one with AI."
+        actions={
+          <>
+            <Link to="/admin/templates/create" className="btn secondary">
+              <WandRegular /> Create with AI
+            </Link>
+            <button className="btn" type="button" disabled={busy} onClick={save}>
+              {busy ? <Spinner size="sm" /> : <SaveRegular />} Save template
             </button>
-          ) : (
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Built-in templates stay read-only — save under a new name to keep edits.
-            </p>
-          )}
+          </>
+        }
+      />
+
+      <div className="design-layout">
+        <section className="card design-preview">
+          <div className="design-preview-bar">
+            <strong>Customer preview</strong>
+            {previewing ? <Spinner size="sm" label="Refreshing…" /> : <span className="muted text-sm">Sample data</span>}
+          </div>
+          <EmailPreviewFrame html={previewHtml || content} subject="Sample Starlight email" fullscreen deviceToggle />
+        </section>
+
+        <aside className="card design-side">
+          <CardHeader icon={<PaintBrushRegular />} title="Template" />
+          <div className="stack" style={{ marginTop: 16 }}>
+            <div className="vnav" role="listbox" aria-label="Templates" style={{ maxHeight: 280, overflow: 'auto' }}>
+              {templates.map((t) => (
+                <button
+                  key={t.name}
+                  type="button"
+                  role="option"
+                  aria-selected={selected === t.name}
+                  className={`vnav-item${selected === t.name ? ' active' : ''}`}
+                  disabled={busy}
+                  onClick={() => setSelected(t.name)}
+                >
+                  <span className="vnav-copy">
+                    <span className="vnav-title">{displayLabel(t)}</span>
+                    <span className="vnav-sub mono">{t.name}</span>
+                  </span>
+                  {t.is_custom ? <span className="badge teal">Custom</span> : <LockClosedRegular title="Built-in" />}
+                </button>
+              ))}
+            </div>
+
+            <hr className="divider" />
+
+            <label className="field">
+              <span>Display label</span>
+              <input
+                className="input"
+                value={saveLabel}
+                disabled={busy}
+                onChange={(e) => setSaveLabel(e.target.value)}
+                placeholder="My design"
+              />
+            </label>
+            <label className="field">
+              <span>Save as filename</span>
+              <input
+                className="input mono"
+                value={saveName}
+                disabled={busy}
+                onChange={(e) => setSaveName(e.target.value)}
+                placeholder="email_template_my_design.html"
+              />
+              <span className="field-hint">Use a new filename to keep a built-in design intact.</span>
+            </label>
+
+            {error ? (
+              <MessageBar intent="error" title="Template error" onDismiss={() => setError('')}>
+                {error}
+              </MessageBar>
+            ) : null}
+
+            {current?.is_custom ? (
+              <button className="btn danger-outline" type="button" disabled={busy} onClick={remove}>
+                <DeleteRegular /> Delete template
+              </button>
+            ) : (
+              <MessageBar intent="info">Built-in templates are read-only — save under a new filename to keep edits.</MessageBar>
+            )}
+          </div>
         </aside>
       </div>
     </div>

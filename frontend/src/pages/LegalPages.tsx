@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
+import { BrandMark, useDocumentTitle } from '../components/ui'
 
 const UPDATED = '22 September 2026'
 const CONTACT = 'info@starlightlinearled.com'
@@ -17,24 +18,22 @@ function LegalShell({
   children: ReactNode
   active: 'privacy' | 'terms'
 }) {
+  useDocumentTitle(title)
   return (
     <div className="legal-screen">
       <header className="legal-top">
         <Link to="/login" className="legal-brand">
-          <div className="brand-mark">S</div>
-          <div>
-            <div className="brand"><span>Starlight AI Mailer</span></div>
-            <div className="muted" style={{ fontSize: 12, fontWeight: 600 }}>Linear LED</div>
-          </div>
+          <BrandMark size={28} />
+          <span>{PRODUCT}</span>
         </Link>
         <nav className="legal-tabs">
           <Link to="/privacy" className={active === 'privacy' ? 'active' : ''}>Privacy Policy</Link>
           <Link to="/terms" className={active === 'terms' ? 'active' : ''}>Terms of Service</Link>
-          <Link to="/login" className="legal-signin">Sign in</Link>
+          <Link to="/login" className="btn">Sign in</Link>
         </nav>
       </header>
 
-      <article className="legal-doc panel">
+      <article className="legal-doc card">
         <p className="legal-updated muted">Last updated {UPDATED}</p>
         <h1>{title}</h1>
         <p className="legal-lead">{subtitle}</p>

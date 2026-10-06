@@ -1,7 +1,19 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  CheckmarkCircleRegular,
+  EyeOffRegular,
+  EyeRegular,
+  LockClosedRegular,
+  MailRegular,
+  MailInboxCheckmarkRegular,
+  PersonRegular,
+  SparkleRegular,
+  ArrowRightRegular,
+} from '@fluentui/react-icons'
 import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { BrandMark, MessageBar, Spinner, useDocumentTitle } from '../components/ui'
 
 /** Exact product name — must match Google OAuth consent screen app name. */
 const APP_NAME = 'Starlight AI Mailer'
@@ -12,7 +24,7 @@ function AuthArt() {
     <div className="auth-art">
       <div className="auth-art-inner">
         <div className="auth-art-brand">
-          <div className="brand-mark">S</div>
+          <BrandMark size={40} />
           <div>
             <div className="auth-product-name">{APP_NAME}</div>
             <div className="auth-company">by {COMPANY}</div>
@@ -21,17 +33,54 @@ function AuthArt() {
 
         <h1>AI email outreach for LED sales teams</h1>
         <p className="auth-purpose">
-          {APP_NAME} helps {COMPANY} draft, review, and send personalized sales emails from your
-          connected Gmail inbox — using your product catalogues, AI writing, and reply approvals in
-          one workspace.
+          Draft, review, and send personalized sales emails from your connected Gmail inbox — grounded
+          in your product catalogues, with every AI reply approved by a person.
         </p>
 
-        <ul className="auth-purpose-list">
-          <li>Connect any Google account and send from that inbox</li>
-          <li>Generate catalogue-aware campaign emails with live preview</li>
-          <li>Approve AI reply drafts before they go out</li>
+        <ul className="auth-features">
+          <li><MailInboxCheckmarkRegular /> Connect any Google account and send from that inbox</li>
+          <li><SparkleRegular /> Generate catalogue-aware campaign emails with live preview</li>
+          <li><CheckmarkCircleRegular /> Approve AI reply drafts before they go out</li>
         </ul>
       </div>
+    </div>
+  )
+}
+
+function PasswordInput({
+  value,
+  onChange,
+  autoComplete,
+  minLength,
+}: {
+  value: string
+  onChange: (v: string) => void
+  autoComplete: string
+  minLength?: number
+}) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="input-wrap">
+      <LockClosedRegular />
+      <input
+        className="input"
+        type={show ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        value={value}
+        minLength={minLength}
+        onChange={(e) => onChange(e.target.value)}
+        required
+      />
+      <button
+        type="button"
+        className="btn subtle icon-only sm input-suffix"
+        style={{ height: 28, width: 28 }}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        title={show ? 'Hide password' : 'Show password'}
+        onClick={() => setShow((v) => !v)}
+      >
+        {show ? <EyeOffRegular /> : <EyeRegular />}
+      </button>
     </div>
   )
 }
@@ -56,6 +105,7 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  useDocumentTitle('Sign in')
 
   useEffect(() => {
     const token = params.get('google_token')
@@ -106,63 +156,60 @@ export function LoginPage() {
     <div className="auth-screen">
       <AuthArt />
       <div className="auth-form-wrap">
-        <form className="auth-card stack" onSubmit={onSubmit}>
+        <form className="auth-card" onSubmit={onSubmit}>
           <div className="auth-card-brand">
-            <div className="brand-mark">S</div>
-            <div>
-              <div className="auth-card-product">{APP_NAME}</div>
-              <div className="muted" style={{ margin: 0, fontSize: 13 }}>Sign in to continue</div>
-            </div>
+            <BrandMark size={28} />
+            <span>{APP_NAME}</span>
           </div>
+          <h2>Sign in</h2>
+          <p className="auth-sub">Use your work account to continue to {APP_NAME}.</p>
 
           <button
-            className="btn google"
+            className="btn google lg block"
             type="button"
             disabled={googleLoading || loading}
             onClick={() => void signInWithGoogle()}
           >
-            <GoogleIcon />
-            {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+            {googleLoading ? <Spinner size="sm" /> : <GoogleIcon />}
+            {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
           </button>
 
-          <div className="auth-divider"><span>or email</span></div>
+          <div className="auth-divider">or use email</div>
 
           <label className="field">
             <span>Work email</span>
-            <input
-              className="input"
-              type="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+            <div className="input-wrap">
+              <MailRegular />
+              <input
+                className="input"
+                type="email"
+                autoComplete="username"
+                placeholder="name@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
           </label>
           <label className="field">
             <span>Password</span>
-            <input
-              className="input"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <PasswordInput value={password} onChange={setPassword} autoComplete="current-password" />
           </label>
           {error ? (
-            <div className="alert danger">
-              <strong>Could not sign in</strong>
-              <div style={{ marginTop: 4 }}>{error}</div>
-            </div>
+            <MessageBar intent="error" title="Could not sign in">
+              {error}
+            </MessageBar>
           ) : null}
-          <button className="btn" type="submit" disabled={loading || googleLoading}>
-            {loading ? 'Signing in…' : 'Continue'}
+          <button className="btn lg block" type="submit" disabled={loading || googleLoading}>
+            {loading ? <Spinner size="sm" /> : null}
+            {loading ? 'Signing in…' : 'Sign in'}
+            {!loading ? <ArrowRightRegular /> : null}
           </button>
-          <div className="muted">
+          <div className="auth-switch">
             New to {APP_NAME}?{' '}
-            <Link to="/signup" style={{ color: 'var(--blue)', fontWeight: 700 }}>Create account</Link>
+            <Link to="/signup" className="link">Create an account</Link>
           </div>
-          <p className="auth-legal muted">
+          <p className="auth-legal">
             <Link to="/privacy">Privacy Policy</Link>
             <span aria-hidden> · </span>
             <Link to="/terms">Terms of Service</Link>
@@ -177,6 +224,7 @@ export function SignupPage() {
   const { setToken } = useAuth()
   const navigate = useNavigate()
   const [form, setForm] = useState({ email: '', password: '', name: '', org_name: COMPANY })
+  useDocumentTitle('Create account')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
@@ -217,73 +265,79 @@ export function SignupPage() {
     <div className="auth-screen">
       <AuthArt />
       <div className="auth-form-wrap">
-        <form className="auth-card stack" onSubmit={onSubmit}>
+        <form className="auth-card" onSubmit={onSubmit}>
           <div className="auth-card-brand">
-            <div className="brand-mark">S</div>
-            <div>
-              <div className="auth-card-product">{APP_NAME}</div>
-              <div className="muted" style={{ margin: 0, fontSize: 13 }}>Create your workspace</div>
-            </div>
+            <BrandMark size={28} />
+            <span>{APP_NAME}</span>
           </div>
+          <h2>Create your account</h2>
+          <p className="auth-sub">Set up a workspace for {COMPANY} in under a minute.</p>
 
           <button
-            className="btn google"
+            className="btn google lg block"
             type="button"
             disabled={googleLoading || loading}
             onClick={() => void signInWithGoogle()}
           >
-            <GoogleIcon />
-            {googleLoading ? 'Redirecting…' : 'Continue with Google'}
+            {googleLoading ? <Spinner size="sm" /> : <GoogleIcon />}
+            {googleLoading ? 'Redirecting to Google…' : 'Continue with Google'}
           </button>
 
-          <div className="auth-divider"><span>or email</span></div>
+          <div className="auth-divider">or use email</div>
 
           <label className="field">
             <span>Full name</span>
-            <input
-              className="input"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
+            <div className="input-wrap">
+              <PersonRegular />
+              <input
+                className="input"
+                autoComplete="name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+              />
+            </div>
           </label>
           <label className="field">
             <span>Work email</span>
-            <input
-              className="input"
-              type="email"
-              autoComplete="username"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              required
-            />
+            <div className="input-wrap">
+              <MailRegular />
+              <input
+                className="input"
+                type="email"
+                autoComplete="username"
+                placeholder="name@company.com"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                required
+              />
+            </div>
           </label>
           <label className="field">
             <span>Password</span>
-            <input
-              className="input"
-              type="password"
-              autoComplete="new-password"
+            <PasswordInput
               value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              required
+              onChange={(v) => setForm({ ...form, password: v })}
+              autoComplete="new-password"
               minLength={8}
             />
+            <span className="field-hint">At least 8 characters.</span>
           </label>
           {error ? (
-            <div className="alert danger">
-              <strong>Could not create account</strong>
-              <div style={{ marginTop: 4 }}>{error}</div>
-            </div>
+            <MessageBar intent="error" title="Could not create account">
+              {error}
+            </MessageBar>
           ) : null}
-          <button className="btn amber" type="submit" disabled={loading || googleLoading}>
-            {loading ? 'Creating…' : 'Get started'}
+          <button className="btn lg block" type="submit" disabled={loading || googleLoading}>
+            {loading ? <Spinner size="sm" /> : null}
+            {loading ? 'Creating account…' : 'Create account'}
+            {!loading ? <ArrowRightRegular /> : null}
           </button>
-          <div className="muted">
-            Already have access?{' '}
-            <Link to="/login" style={{ color: 'var(--blue)', fontWeight: 700 }}>Sign in</Link>
+          <div className="auth-switch">
+            Already have an account?{' '}
+            <Link to="/login" className="link">Sign in</Link>
           </div>
-          <p className="auth-legal muted">
+          <p className="auth-legal">
             By continuing you agree to our{' '}
             <Link to="/terms">Terms</Link>
             {' '}and{' '}

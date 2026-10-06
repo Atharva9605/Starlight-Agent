@@ -1,4 +1,7 @@
+import { useState } from 'react'
+import { ChevronDownRegular, ChevronUpRegular, SparkleRegular } from '@fluentui/react-icons'
 import { EmailPreviewFrame } from './EmailPreviewFrame'
+import { Avatar } from './ui'
 
 type Msg = {
   id: string
@@ -11,34 +14,51 @@ type Msg = {
   created_at?: string
 }
 
-export function MessageBubble({ message }: { message: Msg }) {
+/** One message in a thread, collapsible like Outlook's conversation view. */
+export function MessageBubble({
+  message,
+  clientLabel = 'Client',
+  defaultOpen = false,
+}: {
+  message: Msg
+  clientLabel?: string
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
   const inbound = message.direction === 'inbound'
+  const who = inbound ? clientLabel : 'Starlight Linear LED'
+  const preview = (message.body_text || message.body_html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 140)
+
   return (
-    <div
-      className={`msg-bubble ${inbound ? 'inbound' : 'outbound'}`}
-    >
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-        <span className={`pill ${inbound ? 'warn' : 'ok'}`}>
-          {inbound ? 'Client' : 'Starlight'}
-          {message.status === 'draft' ? ' · Draft' : ''}
-          {message.ai_generated ? ' · AI' : ''}
-        </span>
+    <div className={`msg-card ${inbound ? 'inbound' : 'outbound'}`}>
+      <button type="button" className="msg-card-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <Avatar name={who} size={32} />
+        <div className="msg-card-who">
+          <div className="row nowrap" style={{ gap: 6 }}>
+            <strong className="truncate">{who}</strong>
+            {message.ai_generated ? (
+              <span className="badge brand"><SparkleRegular /> AI</span>
+            ) : null}
+          </div>
+          <div className="text-sm muted truncate">{open ? message.subject || '(no subject)' : preview || message.subject}</div>
+        </div>
         {message.created_at ? (
-          <span className="muted" style={{ fontSize: 11 }}>
-            {new Date(message.created_at).toLocaleString()}
+          <span className="msg-card-time">
+            {new Date(message.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
           </span>
         ) : null}
-      </div>
-      {message.subject ? (
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>{message.subject}</div>
+        {open ? <ChevronUpRegular /> : <ChevronDownRegular />}
+      </button>
+      {open ? (
+        <div className="msg-card-body">
+          <EmailPreviewFrame html={message.body_html} text={message.body_text} subject={message.subject} fromLabel={who} bare />
+        </div>
       ) : null}
-      <EmailPreviewFrame
-        html={message.body_html}
-        text={message.body_text}
-        subject={message.subject}
-        fromLabel={inbound ? 'Client' : 'Starlight Linear LED'}
-        compact
-      />
     </div>
   )
 }

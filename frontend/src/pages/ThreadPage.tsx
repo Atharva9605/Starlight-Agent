@@ -1,20 +1,41 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useParams } from 'react-router-dom'
-import { api } from '../api/client'
+import { useParams } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
+import {
+  ChatMultipleRegular,
+  CheckmarkRegular,
+  DeleteRegular,
+  MailRegular,
+  SaveRegular,
+  SparkleRegular,
+} from '@fluentui/react-icons'
+import { api } from '../api/client'
 import { EmailComposer } from '../components/EmailComposer'
 import { EmailPreviewFrame } from '../components/EmailPreviewFrame'
 import { MessageBubble } from '../components/MessageBubble'
+import {
+  CardHeader,
+  EmptyState,
+  MessageBar,
+  PageHeader,
+  Spinner,
+  useConfirm,
+  useToast,
+} from '../components/ui'
+
+type Pane = 'draft' | 'thread'
 
 export function ThreadPage() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
+  const toast = useToast()
+  const confirm = useConfirm()
   const [instructions, setInstructions] = useState('')
   const [subject, setSubject] = useState('')
   const [bodyHtml, setBodyHtml] = useState('')
   const [bodyText, setBodyText] = useState('')
-  const [notice, setNotice] = useState('')
   const [composerKey, setComposerKey] = useState(0)
+  const [pane, setPane] = useState<Pane>('draft')
 
   const q = useQuery({
     queryKey: ['conversation', id],
@@ -48,10 +69,11 @@ export function ThreadPage() {
   const generate = useMutation({
     mutationFn: () => api.generateDraft(id, instructions),
     onSuccess: async () => {
-      setNotice('Draft ready — review the preview, then approve')
+      toast.success('Draft ready', 'Review the preview, then approve.')
+      setPane('draft')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
-    onError: (e: any) => setNotice(e.message),
+    onError: (e: any) => toast.error("Couldn't write a draft", e.message),
   })
 
   const save = useMutation({
@@ -62,9 +84,10 @@ export function ThreadPage() {
         body_text: bodyText,
       }),
     onSuccess: async () => {
-      setNotice('Saved')
+      toast.success('Draft saved')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
+    onError: (e: any) => toast.error("Couldn't save the draft", e.message),
   })
 
   const approve = useMutation({
@@ -79,106 +102,183 @@ export function ThreadPage() {
       return api.approveDraft(id, draft.id)
     },
     onSuccess: async () => {
-      setNotice('Approved & sent')
+      toast.success('Reply sent', 'The approved draft is on its way to the client.')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
-    onError: (e: any) => setNotice(e.message),
+    onError: (e: any) => toast.error("Couldn't send the reply", e.message),
   })
 
   const reject = useMutation({
     mutationFn: () => api.rejectDraft(id, draft.id),
     onSuccess: async () => {
-      setNotice('Draft discarded')
+      toast.info('Draft discarded')
       setSubject('')
       setBodyHtml('')
       setBodyText('')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
+    onError: (e: any) => toast.error("Couldn't discard the draft", e.message),
   })
 
+  const onApprove = async () => {
+    const ok = await confirm({
+      title: 'Send this reply?',
+      body: `The draft will be sent to ${clientLabel} from your connected mailbox.`,
+      confirmLabel: 'Approve & send',
+    })
+    if (ok) approve.mutate()
+  }
+
+  const onReject = async () => {
+    const ok = await confirm({
+      title: 'Discard this draft?',
+      body: 'The AI draft will be removed. You can generate a new one at any time.',
+      confirmLabel: 'Discard',
+      danger: true,
+    })
+    if (ok) reject.mutate()
+  }
+
   const busy = generate.isPending || save.isPending || approve.isPending || reject.isPending
-  const clientLabel = q.data?.client?.company || q.data?.client?.email || 'Client thread'
+  const clientLabel = q.data?.client?.company || q.data?.client?.email || 'Client'
+  const hasDraftBody = Boolean(draft && (bodyHtml || bodyText))
 
   return (
-    <div className="review-screen">
-      <header className="review-top">
-        <div>
-          <Link to="/inbox" className="muted" style={{ fontWeight: 600, fontSize: 12, letterSpacing: '0.04em' }}>
-            ← INBOX
-          </Link>
-          <h1>{q.data?.subject || 'Conversation'}</h1>
-          <p className="muted" style={{ margin: '0.2rem 0 0' }}>{clientLabel}</p>
-        </div>
-        <div className="row">
-          {notice ? <span className="pill ok">{notice}</span> : null}
-          <span className="pill pink">Human approve required</span>
-        </div>
-      </header>
+    <div>
+      <PageHeader
+        breadcrumb={[{ label: 'Inbox', to: '/inbox' }, { label: q.data?.subject || 'Conversation' }]}
+        title={q.data?.subject || 'Conversation'}
+        subtitle={clientLabel}
+        actions={<span className="badge warning lg">Human approval required</span>}
+      />
 
-      <div className="review-body">
-        <div className="review-mail">
-          {draft && (bodyHtml || bodyText) ? (
-            <EmailPreviewFrame html={bodyHtml} text={bodyText} subject={subject} fullscreen />
-          ) : (
-            <div className="panel empty-state" style={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-              <div style={{ textAlign: 'center', maxWidth: 360 }}>
-                <strong style={{ fontFamily: 'var(--display)' }}>
-                  {generate.isPending ? 'Writing draft…' : 'No draft yet'}
-                </strong>
-                <p className="muted" style={{ margin: '0.5rem 0 0' }}>
-                  {generate.isPending
-                    ? 'Starlight is composing a reply for this thread.'
-                    : 'Generate a draft from the side panel after a client reply.'}
-                </p>
-              </div>
-            </div>
-          )}
+      {q.isError ? (
+        <div className="page-alerts">
+          <MessageBar intent="error" title="Couldn't load this conversation">
+            {(q.error as Error)?.message}
+          </MessageBar>
         </div>
+      ) : null}
 
-        <aside className={`review-side${generate.isPending ? ' is-generating' : ''}`}>
-          <div className="review-queue stack" style={{ maxHeight: 200, overflow: 'auto' }}>
-            <strong style={{ fontFamily: 'var(--display)', fontSize: 14 }}>Timeline</strong>
-            {timeline.length === 0 ? (
-              <div className="muted" style={{ fontSize: 13 }}>No messages yet in this thread.</div>
-            ) : (
-              timeline.map((m: any) => <MessageBubble key={m.id} message={m} />)
-            )}
+      <div className="thread-layout">
+        <section className="card flush thread-main">
+          <div className="tablist" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={pane === 'draft'}
+              className={`tab${pane === 'draft' ? ' active' : ''}`}
+              onClick={() => setPane('draft')}
+            >
+              <MailRegular /> Draft preview
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={pane === 'thread'}
+              className={`tab${pane === 'thread' ? ' active' : ''}`}
+              onClick={() => setPane('thread')}
+            >
+              <ChatMultipleRegular /> Conversation
+              <span className="tab-count">{timeline.length}</span>
+            </button>
           </div>
 
-          <div className="panel tint-amber stack" style={{ flex: 1 }}>
-            <div className="studio-editor-head">
-              <div>
-                <h2 style={{ fontSize: '1.05rem' }}>AI draft</h2>
-                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: 13 }}>
-                  Edit like email — preview is what the client gets.
-                </p>
+          <div className="thread-pane">
+            {q.isLoading ? (
+              <div className="center-fill">
+                <Spinner label="Loading conversation…" />
               </div>
-            </div>
+            ) : pane === 'draft' ? (
+              hasDraftBody ? (
+                <EmailPreviewFrame
+                  html={bodyHtml}
+                  text={bodyText}
+                  subject={subject}
+                  fullscreen
+                  deviceToggle
+                />
+              ) : (
+                <div className="preview-empty">
+                  {generate.isPending ? (
+                    <Spinner size="lg" />
+                  ) : (
+                    <MailRegular className="preview-empty-icon" />
+                  )}
+                  <strong>{generate.isPending ? 'Writing draft…' : 'No draft yet'}</strong>
+                  <p>
+                    {generate.isPending
+                      ? 'Starlight is composing a reply for this thread.'
+                      : 'Use the AI draft panel to generate a reply once the client has written back.'}
+                  </p>
+                </div>
+              )
+            ) : timeline.length === 0 ? (
+              <EmptyState
+                compact
+                icon={<ChatMultipleRegular />}
+                title="No messages yet"
+                description="Messages in this thread will appear here."
+              />
+            ) : (
+              <div className="timeline">
+                {timeline.map((m: any, i: number) => (
+                  <MessageBubble
+                    key={m.id}
+                    message={m}
+                    clientLabel={clientLabel}
+                    defaultOpen={i === timeline.length - 1}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
 
+        <aside className="card thread-side">
+          <CardHeader
+            icon={<SparkleRegular />}
+            title="AI draft"
+            subtitle="Edit it like an email — the preview is exactly what the client receives."
+          />
+
+          <div className="stack" style={{ marginTop: 16 }}>
             <label className="field">
               <span>Refine with AI</span>
               <input
                 className="input"
-                placeholder="Tone, products, CTA…"
+                placeholder="Tone, products, call to action…"
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !busy) generate.mutate()
+                }}
               />
             </label>
-            <button className="btn amber" type="button" onClick={() => generate.mutate()} disabled={busy}>
+            <button
+              className={`btn ${draft ? 'secondary' : ''}`}
+              type="button"
+              onClick={() => generate.mutate()}
+              disabled={busy}
+            >
+              {generate.isPending ? <Spinner size="sm" /> : <SparkleRegular />}
               {generate.isPending ? 'Writing draft…' : draft ? 'Regenerate draft' : 'Generate draft'}
             </button>
 
             {draft ? (
               <>
+                <hr className="divider" />
                 {draft.internal_note ? (
-                  <div className="pill warn">Sales note: {draft.internal_note}</div>
+                  <MessageBar intent="warning" title="Sales note">
+                    {draft.internal_note}
+                  </MessageBar>
                 ) : null}
                 <label className="field">
                   <span>Subject</span>
                   <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
                 </label>
-                <label className="field">
-                  <span>Body</span>
+                <div className="field">
+                  <span className="field-label">Body</span>
                   <EmailComposer
                     key={composerKey}
                     html={bodyHtml}
@@ -187,23 +287,23 @@ export function ThreadPage() {
                       setBodyText(t)
                     }}
                   />
-                </label>
-                <div className="row">
-                  <button className="btn secondary" type="button" onClick={() => save.mutate()} disabled={busy}>
-                    Save
+                </div>
+                <div className="row between">
+                  <button className="btn danger-outline" type="button" onClick={onReject} disabled={busy}>
+                    <DeleteRegular /> Discard
                   </button>
-                  <button className="btn" type="button" onClick={() => approve.mutate()} disabled={busy}>
-                    Approve & send
-                  </button>
-                  <button className="btn danger" type="button" onClick={() => reject.mutate()} disabled={busy}>
-                    Reject
-                  </button>
+                  <div className="row">
+                    <button className="btn secondary" type="button" onClick={() => save.mutate()} disabled={busy}>
+                      <SaveRegular /> Save
+                    </button>
+                    <button className="btn" type="button" onClick={onApprove} disabled={busy}>
+                      <CheckmarkRegular /> Approve & send
+                    </button>
+                  </div>
                 </div>
               </>
             ) : (
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                No draft yet — generate after a client reply.
-              </p>
+              <p className="muted text-sm">No draft yet — generate one after a client reply.</p>
             )}
           </div>
         </aside>

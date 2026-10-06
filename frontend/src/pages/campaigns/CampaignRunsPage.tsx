@@ -1,15 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import {
+  AddRegular,
+  DeleteRegular,
+  DismissCircleRegular,
+  HistoryRegular,
+  OpenRegular,
+  PlayRegular,
+  ArrowEnterRegular,
+} from '@fluentui/react-icons'
 import { api, type CampaignRun } from '../../api/client'
 import { useCampaign } from '../../campaign/CampaignContext'
+import { EmptyState, MessageBar, PageHeader, Spinner, useConfirm, useToast } from '../../components/ui'
 
-const STATUS_PILL: Record<string, string> = {
-  scheduled: 'discover',
-  running: 'warn',
-  paused: 'warn',
-  done: 'ok',
-  stopped: '',
-  failed: 'pink',
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  scheduled: { label: 'Scheduled', cls: 'purple' },
+  running: { label: 'Sending', cls: 'brand' },
+  paused: { label: 'Paused', cls: 'warning' },
+  done: { label: 'Completed', cls: 'success' },
+  stopped: { label: 'Stopped', cls: '' },
+  failed: { label: 'Failed', cls: 'danger' },
 }
 
 export function runLabel(run: CampaignRun): string {
@@ -31,6 +41,8 @@ export function formatWhen(value: string | null | undefined): string {
 /** Every campaign this org has run — live ones to rejoin, finished ones to read. */
 export function CampaignRunsPage() {
   const nav = useNavigate()
+  const toast = useToast()
+  const confirm = useConfirm()
   const { attachRun } = useCampaign()
   const [runs, setRuns] = useState<CampaignRun[]>([])
   const [loading, setLoading] = useState(true)
@@ -82,9 +94,18 @@ export function CampaignRunsPage() {
   }
 
   const cancel = async (run: CampaignRun) => {
+    const ok = await confirm({
+      title: 'Cancel this scheduled campaign?',
+      body: `“${runLabel(run)}” won't be sent. This can't be undone.`,
+      confirmLabel: 'Cancel campaign',
+      cancelLabel: 'Keep it',
+      danger: true,
+    })
+    if (!ok) return
     setBusyId(run.id)
     try {
       await api.stopCampaignRun(run.id)
+      toast.info('Scheduled campaign cancelled')
       await load()
     } catch (e: any) {
       setError(e?.message || 'Could not cancel that run')
@@ -94,10 +115,18 @@ export function CampaignRunsPage() {
   }
 
   const remove = async (run: CampaignRun) => {
+    const ok = await confirm({
+      title: 'Delete this run?',
+      body: `The history for “${runLabel(run)}” will be removed. Emails that were already sent are not affected.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
     setBusyId(run.id)
     try {
       await api.deleteCampaignRun(run.id)
       setRuns((prev) => prev.filter((r) => r.id !== run.id))
+      toast.info('Run deleted')
     } catch (e: any) {
       setError(e?.message || 'Could not delete that run')
     } finally {
@@ -106,102 +135,142 @@ export function CampaignRunsPage() {
   }
 
   return (
-    <div className="dash-screen">
-      <header className="dash-hero">
-        <div>
-          <div className="dash-kicker">Campaign history</div>
-          <h1>Runs</h1>
-          <p className="muted">
-            Every campaign runs on the server, so closing the tab never stops one. Rejoin a live
-            run or open a finished one to read the whole thing.
-          </p>
+    <div>
+      <PageHeader
+        title="Campaign runs"
+        subtitle="Every campaign runs on the server, so closing the tab never stops one. Rejoin a live run or open a finished one."
+        actions={
+          <Link to="/campaigns" className="btn">
+            <AddRegular /> New campaign
+          </Link>
+        }
+      />
+
+      {error ? (
+        <div className="page-alerts">
+          <MessageBar intent="error" onDismiss={() => setError('')}>{error}</MessageBar>
         </div>
-        <Link to="/campaigns" className="btn">
-          New campaign
-        </Link>
-      </header>
+      ) : null}
 
-      {error ? <div className="panel stack notice pink">{error}</div> : null}
-
-      <div className="panel stack">
+      <section className="card flush">
         {loading ? (
-          <p className="muted">Loading runs…</p>
+          <div className="center-fill" style={{ minHeight: 200 }}>
+            <Spinner label="Loading runs…" />
+          </div>
         ) : !runs.length ? (
-          <p className="muted">No campaigns yet. Start one from Campaigns.</p>
+          <EmptyState
+            icon={<HistoryRegular />}
+            title="No campaigns yet"
+            description="Runs appear here as soon as you start or schedule a campaign."
+            actions={
+              <Link to="/campaigns" className="btn">
+                <AddRegular /> New campaign
+              </Link>
+            }
+          />
         ) : (
-          <div className="queue">
-            {runs.map((run) => {
-              const live = run.status === 'running' || run.status === 'paused'
-              const scheduled = run.status === 'scheduled'
-              return (
-                <div key={run.id} className="queue-row">
-                  <span className={`queue-index ${run.status === 'done' ? 'sent' : run.status}`}>
-                    {run.counts.sent}
-                  </span>
-                  <span className="queue-name">
-                    {runLabel(run)}
-                    <span className="muted" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
-                      {scheduled
-                        ? `Sends ${formatWhen(run.scheduled_at)} · ${run.total} lead${run.total === 1 ? '' : 's'}`
-                        : `${formatWhen(run.created_at)} · ${run.counts.sent} sent · ${run.counts.failed} failed`}
-                      {!scheduled && run.counts.pending ? ` · ${run.counts.pending} left` : ''}
-                      {run.sender_email ? ` · from ${run.sender_email}` : ''}
-                    </span>
-                  </span>
-                  <span className={`pill ${STATUS_PILL[run.status] ?? ''}`}>
-                    {run.status === 'running' ? 'Sending' : run.status}
-                  </span>
-                  <span className="row" style={{ gap: 6 }}>
-                    {scheduled ? (
-                      <>
-                        <button
-                          className="btn"
-                          type="button"
-                          disabled={busyId === run.id}
-                          onClick={() => void startNow(run)}
-                        >
-                          Start now
-                        </button>
-                        <button
-                          className="btn secondary"
-                          type="button"
-                          disabled={busyId === run.id}
-                          onClick={() => void cancel(run)}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : live ? (
-                      <button
-                        className="btn"
-                        type="button"
-                        disabled={busyId === run.id}
-                        onClick={() => void rejoin(run)}
-                      >
-                        {busyId === run.id ? 'Opening…' : 'Rejoin'}
-                      </button>
-                    ) : (
-                      <Link className="btn secondary" to={`/campaigns/runs/${run.id}`}>
-                        View full run
-                      </Link>
-                    )}
-                    {!live && !scheduled ? (
-                      <button
-                        className="btn secondary"
-                        type="button"
-                        disabled={busyId === run.id}
-                        onClick={() => void remove(run)}
-                      >
-                        Delete
-                      </button>
-                    ) : null}
-                  </span>
-                </div>
-              )
-            })}
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Campaign</th>
+                  <th>Status</th>
+                  <th className="hide-sm">Progress</th>
+                  <th className="hide-sm">When</th>
+                  <th className="actions"><span className="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run) => {
+                  const live = run.status === 'running' || run.status === 'paused'
+                  const scheduled = run.status === 'scheduled'
+                  const badge = STATUS_BADGE[run.status] || { label: run.status, cls: '' }
+                  const pct = run.total ? Math.round((run.counts.processed / run.total) * 100) : 0
+                  const rowBusy = busyId === run.id
+                  return (
+                    <tr key={run.id}>
+                      <td>
+                        <div style={{ minWidth: 0 }}>
+                          {scheduled || live ? (
+                            <strong className="truncate" style={{ display: 'block', maxWidth: 320 }}>{runLabel(run)}</strong>
+                          ) : (
+                            <Link to={`/campaigns/runs/${run.id}`} className="link" style={{ fontWeight: 600 }}>
+                              {runLabel(run)}
+                            </Link>
+                          )}
+                          <span className="cell-sub">
+                            {run.total} lead{run.total === 1 ? '' : 's'}
+                            {run.sender_email ? ` · from ${run.sender_email}` : ''}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`badge ${badge.cls}`}>
+                          {run.status === 'running' ? <span className="live-dot" /> : null}
+                          {badge.label}
+                        </span>
+                      </td>
+                      <td className="hide-sm" style={{ minWidth: 180 }}>
+                        {scheduled ? (
+                          <span className="muted">Not started</span>
+                        ) : (
+                          <div className="stack tight">
+                            <span className="text-sm">
+                              {run.counts.sent} sent · {run.counts.failed} failed
+                              {run.counts.pending ? ` · ${run.counts.pending} left` : ''}
+                            </span>
+                            <div className="progress">
+                              <div className={`progress-fill${run.status === 'done' ? ' success' : ''}`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                      <td className="hide-sm muted" style={{ whiteSpace: 'nowrap' }}>
+                        {scheduled ? `Sends ${formatWhen(run.scheduled_at)}` : formatWhen(run.created_at)}
+                      </td>
+                      <td className="actions">
+                        <div className="row nowrap" style={{ justifyContent: 'flex-end', gap: 4 }}>
+                          {scheduled ? (
+                            <>
+                              <button className="btn sm" type="button" disabled={rowBusy} onClick={() => void startNow(run)}>
+                                <PlayRegular /> Start now
+                              </button>
+                              <button className="btn subtle sm" type="button" disabled={rowBusy} onClick={() => void cancel(run)}>
+                                <DismissCircleRegular /> Cancel
+                              </button>
+                            </>
+                          ) : live ? (
+                            <button className="btn sm" type="button" disabled={rowBusy} onClick={() => void rejoin(run)}>
+                              {rowBusy ? <Spinner size="sm" /> : <ArrowEnterRegular />}
+                              {rowBusy ? 'Opening…' : 'Rejoin'}
+                            </button>
+                          ) : (
+                            <>
+                              <Link className="btn secondary sm" to={`/campaigns/runs/${run.id}`}>
+                                <OpenRegular /> Open
+                              </Link>
+                              <button
+                                className="btn subtle icon-only sm"
+                                type="button"
+                                aria-label={`Delete ${runLabel(run)}`}
+                                title="Delete run"
+                                disabled={rowBusy}
+                                onClick={() => void remove(run)}
+                              >
+                                <DeleteRegular />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
+      </section>
     </div>
   )
 }

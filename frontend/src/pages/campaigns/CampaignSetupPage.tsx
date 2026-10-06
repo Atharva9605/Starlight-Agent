@@ -1,15 +1,28 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import {
+  CheckmarkCircleFilled,
+  DeleteRegular,
+  DismissRegular,
+  DocumentTableRegular,
+  GlobeSearchRegular,
+  PlayRegular,
+  CalendarClockRegular,
+  SendRegular,
+  WandRegular,
+  EyeRegular,
+} from '@fluentui/react-icons'
 import { Dropzone } from '../../components/Dropzone'
 import { TEMPLATES, useCampaign } from '../../campaign/CampaignContext'
 import { api } from '../../api/client'
+import { MessageBar, PageHeader, Spinner, Switch } from '../../components/ui'
 
 type TemplateOption = { value: string; label: string; blurb: string; swatch: string[] }
 
 const SWATCHES: Record<string, string[]> = {
-  'email_template.html': ['#2563eb', '#06b6d4'],
-  'email_template_minimalist.html': ['#0f172a', '#64748b'],
-  'email_template_bold.html': ['#f59e0b', '#e11d48'],
+  'email_template.html': ['#0F6CBD', '#2886DE'],
+  'email_template_minimalist.html': ['#242424', '#707070'],
+  'email_template_bold.html': ['#F7630C', '#C50F1F'],
 }
 
 /** `<input type="datetime-local">` wants local wall-clock time without a zone. */
@@ -29,8 +42,38 @@ function toOption(t: { name: string; label: string; is_custom?: boolean }): Temp
     value: t.name,
     label: t.label || t.name,
     blurb: t.is_custom ? 'Custom AI / saved design.' : TEMPLATES.find((x) => x.value === t.name)?.blurb || 'Org template.',
-    swatch: SWATCHES[t.name] || (t.is_custom ? ['#0d9488', '#14b8a6'] : ['#2563eb', '#06b6d4']),
+    swatch: SWATCHES[t.name] || (t.is_custom ? ['#038387', '#00B7C3'] : ['#0F6CBD', '#2886DE']),
   }
+}
+
+function Step({
+  n,
+  done,
+  title,
+  subtitle,
+  actions,
+  children,
+}: {
+  n: number
+  done?: boolean
+  title: string
+  subtitle?: string
+  actions?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section className="card">
+      <div className="card-header">
+        <span className={`step-num${done ? ' done' : ''}`}>{done ? <CheckmarkCircleFilled /> : n}</span>
+        <div className="card-header-copy">
+          <h2 className="card-title">{title}</h2>
+          {subtitle ? <p className="card-subtitle">{subtitle}</p> : null}
+        </div>
+        {actions ? <div className="card-header-actions">{actions}</div> : null}
+      </div>
+      <div className="stack" style={{ marginTop: 16 }}>{children}</div>
+    </section>
+  )
 }
 
 /** Page 1 — upload leads, pick template, launch (review or autosend). */
@@ -141,302 +184,296 @@ export function CampaignSetupPage() {
   }
 
   const inFlight = status === 'running' || status === 'reviewing' || status === 'paused'
+  const goesLive = status === 'running' || (status === 'paused' && autosend)
+  const serpCount = leads.filter((l) => !l.website && (l.company || l.name)).length
+  const canLaunch = leads.length > 0 && !launching && !inFlight && (!scheduleLater || scheduleValid)
+
+  const launchLabel = launching
+    ? scheduleLater
+      ? 'Scheduling…'
+      : 'Starting…'
+    : scheduleLater
+      ? `Schedule ${leads.length} email${leads.length === 1 ? '' : 's'}`
+      : autosend
+        ? `Autosend ${leads.length} email${leads.length === 1 ? '' : 's'}`
+        : `Generate & review ${leads.length}`
+
+  const launchIcon = launching ? <Spinner size="sm" /> : scheduleLater ? <CalendarClockRegular /> : autosend ? <SendRegular /> : <PlayRegular />
 
   return (
     <div>
-      <div className="page-hero">
-        <div>
-          <h1>Campaigns</h1>
-          <p>Upload leads, choose a look, then generate every email at once — review, send now, or bulk send.</p>
-        </div>
-        <div className="row">
-          {inFlight ? (
-            <button
-              className="btn"
-              type="button"
-              onClick={() =>
-                nav(status === 'running' || (status === 'paused' && autosend) ? '/campaigns/live' : '/campaigns/review')
-              }
-            >
-              {status === 'running' || (status === 'paused' && autosend)
-                ? 'View Live progress Logs'
-                : 'Review emails'}
+      <PageHeader
+        title="New campaign"
+        subtitle="Upload leads, choose a design, then generate every email at once — review first or send automatically."
+        actions={
+          inFlight ? (
+            <button className="btn" type="button" onClick={() => nav(goesLive ? '/campaigns/live' : '/campaigns/review')}>
+              <EyeRegular /> {goesLive ? 'View live progress' : 'Review emails'}
             </button>
-          ) : (
-            <button
-              className="btn"
-              type="button"
-              disabled={!leads.length || launching || (scheduleLater && !scheduleValid)}
-              onClick={launch}
-            >
-              {launching
-                ? scheduleLater
-                  ? 'Scheduling…'
-                  : 'Starting…'
-                : scheduleLater
-                  ? 'Schedule campaign'
-                  : 'Start campaign'}
-            </button>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
-      {finishedRun ? (
-        <div className="panel stack">
-          <strong style={{ fontFamily: 'var(--display)' }}>
-            Your last campaign finished while you were away
-          </strong>
-          <p className="muted" style={{ margin: 0 }}>
+      <div className="page-alerts">
+        {inFlight ? (
+          <MessageBar
+            intent="info"
+            title="A campaign is already in progress"
+            actions={
+              <button className="btn secondary sm" type="button" onClick={() => nav(goesLive ? '/campaigns/live' : '/campaigns/review')}>
+                Open it
+              </button>
+            }
+          >
+            Finish or stop it before starting another one.
+          </MessageBar>
+        ) : null}
+        {finishedRun ? (
+          <MessageBar
+            intent="success"
+            title="Your last campaign finished while you were away"
+            onDismiss={dismissFinishedRun}
+            actions={
+              <Link to={`/campaigns/runs/${finishedRun.id}`} className="btn secondary sm">
+                See the run
+              </Link>
+            }
+          >
             {finishedRun.counts.sent} sent · {finishedRun.counts.failed} failed
             {finishedRun.counts.pending ? ` · ${finishedRun.counts.pending} never sent` : ''}
             {finishedRun.file_name ? ` · ${finishedRun.file_name}` : ''}
-          </p>
-          <div className="row" style={{ gap: 8 }}>
-            <Link to={`/campaigns/runs/${finishedRun.id}`} className="btn">
-              See the whole run
-            </Link>
-            <button className="btn secondary" type="button" onClick={dismissFinishedRun}>
-              Dismiss
-            </button>
-          </div>
-        </div>
-      ) : null}
+          </MessageBar>
+        ) : null}
+      </div>
 
       <div className="setup-grid">
-        <div className="stack">
-          <div className="panel stack">
-            <strong style={{ fontFamily: 'var(--display)' }}>1 · Lead list</strong>
-            <Dropzone
-              accept=".xlsx,.xls,.csv"
-              busy={busy}
-              title="Drop Excel / CSV here"
-              hint="Two columns: company + website. Website used when present; otherwise OpenSERP finds it from company."
-              onFiles={onFiles}
-            />
-            {error ? <div className="alert danger">{error}</div> : null}
+        <div className="setup-col">
+          <Step
+            n={1}
+            done={leads.length > 0}
+            title="Lead list"
+            subtitle="Excel or CSV with company and website columns. Rows without a website are looked up automatically."
+          >
             {leads.length ? (
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <span className="muted">
-                  <strong>{leads.length}</strong> leads · {fileName}
-                  {leads.some((l) => !l.website && (l.company || l.name)) ? (
-                    <> · <span className="pill discover">OpenSERP for name-only rows</span></>
-                  ) : null}
-                </span>
-                <button className="btn secondary" type="button" onClick={clearLeads}>
-                  Clear
+              <div className="file-chip">
+                <DocumentTableRegular className="file-chip-icon" />
+                <div className="grow">
+                  <strong className="truncate" style={{ display: 'block' }}>{fileName}</strong>
+                  <span className="muted text-sm">
+                    {leads.length} lead{leads.length === 1 ? '' : 's'}
+                    {serpCount ? ` · ${serpCount} will be looked up by name` : ''}
+                  </span>
+                </div>
+                <button className="btn subtle" type="button" onClick={clearLeads}>
+                  <DeleteRegular /> Remove
                 </button>
               </div>
-            ) : null}
-          </div>
+            ) : (
+              <Dropzone
+                accept=".xlsx,.xls,.csv"
+                busy={busy}
+                title="Drop your lead sheet here"
+                hint="XLSX, XLS or CSV"
+                onFiles={onFiles}
+              />
+            )}
+            {error ? <MessageBar intent="error" title="Couldn't read that file" onDismiss={() => setError('')}>{error}</MessageBar> : null}
+          </Step>
 
           {leads.length ? (
-            <div className="panel stack">
-              <strong style={{ fontFamily: 'var(--display)' }}>Leads</strong>
-              <div className="table-wrap" style={{ maxHeight: 280 }}>
+            <section className="card flush">
+              <div className="card-section row between">
+                <strong>Leads</strong>
+                <span className="badge">{leads.length}</span>
+              </div>
+              <div className="table-wrap" style={{ maxHeight: 360, borderTop: '1px solid var(--stroke-2)' }}>
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>#</th>
+                      <th className="num">#</th>
                       <th>Company</th>
-                      <th>Website</th>
-                      <th>Path</th>
-                      <th />
+                      <th className="hide-sm">Website</th>
+                      <th>Source</th>
+                      <th className="actions"><span className="sr-only">Remove</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {leads.map((l, i) => {
                       const viaSerp = !l.website && Boolean(l.company || l.name)
                       return (
-                      <tr key={i}>
-                        <td className="muted">{i + 1}</td>
-                        <td style={{ fontWeight: 600 }}>{l.company || l.name || <span className="muted">—</span>}</td>
-                        <td>
-                          {l.website || (
-                            <span className="muted">{viaSerp ? 'will look up' : '—'}</span>
-                          )}
-                        </td>
-                        <td>
-                          {viaSerp ? (
-                            <span className="pill discover">OpenSERP</span>
-                          ) : l.website ? (
-                            <span className="pill">Website</span>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                        <td>
-                          <button className="icon-btn" type="button" onClick={() => removeLead(i)}>
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
+                        <tr key={i}>
+                          <td className="num muted">{i + 1}</td>
+                          <td><strong>{l.company || l.name || <span className="muted">—</span>}</strong></td>
+                          <td className="hide-sm truncate" style={{ maxWidth: 220 }}>
+                            {l.website || <span className="muted">{viaSerp ? 'Will look up' : '—'}</span>}
+                          </td>
+                          <td>
+                            {viaSerp ? (
+                              <span className="badge teal"><GlobeSearchRegular /> Search</span>
+                            ) : l.website ? (
+                              <span className="badge">Website</span>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </td>
+                          <td className="actions">
+                            <button
+                              className="btn subtle icon-only sm"
+                              type="button"
+                              aria-label={`Remove ${l.company || l.name || `lead ${i + 1}`}`}
+                              title="Remove lead"
+                              onClick={() => removeLead(i)}
+                            >
+                              <DismissRegular />
+                            </button>
+                          </td>
+                        </tr>
                       )
                     })}
                   </tbody>
                 </table>
               </div>
-            </div>
+            </section>
           ) : null}
         </div>
 
-        <div className="stack">
-          <div className="panel stack">
-            <strong style={{ fontFamily: 'var(--display)' }}>2 · Template</strong>
-            {templateOptions.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                className={`template-card${template === t.value ? ' selected' : ''}`}
-                onClick={() => setTemplate(t.value)}
-              >
-                <span
-                  className="template-swatch"
-                  style={{ background: `linear-gradient(135deg, ${t.swatch[0]}, ${t.swatch[1]})` }}
-                />
-                <span className="template-copy">
-                  <strong>{t.label}</strong>
-                  <span className="muted">{t.blurb}</span>
-                </span>
-                <span className="template-check">{template === t.value ? '✓' : ''}</span>
-              </button>
-            ))}
-            <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-              Need a new look? Create one under Admin → Create with AI.
-            </p>
-          </div>
+        <div className="setup-col">
+          <Step
+            n={2}
+            done={Boolean(template)}
+            title="Design"
+            subtitle="The HTML layout every email is rendered with."
+            actions={
+              <Link to="/admin/templates/create" className="btn subtle sm">
+                <WandRegular /> Create with AI
+              </Link>
+            }
+          >
+            <div className="stack tight" role="radiogroup" aria-label="Email design">
+              {templateOptions.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={template === t.value}
+                  className={`choice-card${template === t.value ? ' selected' : ''}`}
+                  onClick={() => setTemplate(t.value)}
+                >
+                  <span className="swatch" style={{ background: `linear-gradient(135deg, ${t.swatch[0]}, ${t.swatch[1]})` }} />
+                  <span className="choice-card-copy">
+                    <strong>{t.label}</strong>
+                    <span>{t.blurb}</span>
+                  </span>
+                  {template === t.value ? <CheckmarkCircleFilled className="choice-card-check" /> : <span className="choice-card-ring" />}
+                </button>
+              ))}
+            </div>
+          </Step>
 
-          <div className="panel stack">
-            <strong style={{ fontFamily: 'var(--display)' }}>3 · Send options</strong>
-
-            <label className="toggle-row">
-              <input
-                type="checkbox"
+          <Step n={3} title="Send options" subtitle="Choose how and when emails go out.">
+            <div>
+              <Switch
                 checked={autosend}
-                onChange={(e) => {
-                  setAutosend(e.target.checked)
-                  if (!e.target.checked) toggleSchedule(false)
+                onChange={(v) => {
+                  setAutosend(v)
+                  if (!v) toggleSchedule(false)
                 }}
+                label="Autosend"
+                description="Skip review — research, write and send every lead automatically while you watch live progress."
               />
-              <span>
-                <strong>Autosend</strong>
-                <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                  Skip review — scrape, write, and send every lead automatically on Live progress Logs.
-                </span>
-              </span>
-            </label>
-
-            <label className="toggle-row">
-              <input
-                type="checkbox"
+              <Switch
                 checked={scheduleLater}
-                onChange={(e) => toggleSchedule(e.target.checked)}
+                onChange={toggleSchedule}
+                label="Schedule for later"
+                description="The server starts the campaign at the chosen time and autosends every lead. You can close the browser."
               />
-              <span>
-                <strong>Schedule for later</strong>
-                <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                  Pick a date and time — the server starts the campaign then and autosends every lead.
-                  You can close the browser.
-                </span>
-              </span>
-            </label>
-
-            {scheduleLater ? (
-              <label className="field">
-                <span>Send at (your local time)</span>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  min={toLocalInput(new Date())}
-                  value={scheduleAt}
-                  onChange={(e) => {
-                    setScheduleAt(e.target.value)
-                    setScheduleError('')
-                  }}
-                />
-              </label>
-            ) : null}
-
-            {scheduleError ? <div className="alert danger" style={{ margin: 0 }}>{scheduleError}</div> : null}
-
-            <label className="toggle-row">
-              <input
-                type="checkbox"
+              {scheduleLater ? (
+                <label className="field" style={{ paddingBottom: 12 }}>
+                  <span>Send at (your local time)</span>
+                  <input
+                    className="input"
+                    type="datetime-local"
+                    min={toLocalInput(new Date())}
+                    value={scheduleAt}
+                    onChange={(e) => {
+                      setScheduleAt(e.target.value)
+                      setScheduleError('')
+                    }}
+                  />
+                  {scheduleValid ? <span className="field-hint">Starts {formatScheduled(scheduleAt)}</span> : null}
+                </label>
+              ) : null}
+              <Switch
                 checked={attachProductSheet}
-                onChange={(e) => setAttachProductSheet(e.target.checked)}
+                onChange={setAttachProductSheet}
+                label="Attach product sheet PDF"
+                description="A branded Starlight PDF of the catalogue products suggested in each email."
               />
-              <span>
-                <strong>Attach product sheet PDF</strong>
-                <span className="muted" style={{ display: 'block', fontSize: 13 }}>
-                  Optional branded Starlight PDF of catalogue products suggested in the email.
-                </span>
-              </span>
-            </label>
+            </div>
 
-            {!autosend ? (
-              <div className="alert warn" style={{ margin: 0 }}>
-                All emails are generated together. Open the review board to send now, add to bulk send, or discard.
-              </div>
-            ) : scheduleLater ? (
-              <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
-                Scheduled campaigns show under <strong>Campaign Runs</strong> — start them early or cancel from there.
-              </div>
-            ) : (
-              <div className="alert" style={{ margin: 0, borderColor: '#bfdbfe', background: '#eff6ff', color: '#1e3a8a' }}>
-                Autosend runs on <strong>/campaigns/live</strong> with live preview and per-lead stage timeline.
-              </div>
-            )}
+            {scheduleError ? <MessageBar intent="error" onDismiss={() => setScheduleError('')}>{scheduleError}</MessageBar> : null}
+
+            <MessageBar intent="info">
+              {!autosend
+                ? 'Emails are generated together, then you send, bulk-send or discard each one from the review board.'
+                : scheduleLater
+                  ? 'Scheduled campaigns appear under Campaign runs — start them early or cancel from there.'
+                  : 'Autosend opens the live view with a preview and stage timeline for each lead.'}
+            </MessageBar>
+
+            <hr className="divider" />
 
             <label className="field">
-              <span>Test inbox (optional)</span>
+              <span>Test inbox</span>
               <input
                 className="input"
+                type="email"
                 placeholder="you@starlightlinearled.com"
                 value={recipientOverride}
                 onChange={(e) => setRecipientOverride(e.target.value)}
               />
+              <span className="field-hint">Optional. When set, every email goes here instead of to the lead.</span>
             </label>
 
-            <label className="field">
-              <span>{autosend ? 'Pause between sends' : 'Pause between bulk sends'}</span>
-              <div className="row" style={{ gap: '0.75rem' }}>
+            <div className="field">
+              <span className="field-label">{autosend ? 'Pause between sends' : 'Pause between bulk sends'}</span>
+              <div className="slider-row">
                 <input
                   type="range"
                   min={1}
                   max={15}
                   value={delay}
+                  aria-label="Seconds between sends"
                   onChange={(e) => setDelay(Number(e.target.value))}
-                  style={{ flex: 1 }}
                 />
-                <span className="pill">{delay}s</span>
+                <span className="slider-value">{delay}s</span>
               </div>
-            </label>
-          </div>
-
-          {leads.length ? (
-            <div className="setup-actions">
-              <span className="muted" style={{ marginRight: 'auto', fontSize: 13 }}>
-                {leads.length} lead{leads.length === 1 ? '' : 's'} ready
-              </span>
-              <button
-                className="btn"
-                type="button"
-                disabled={!leads.length || launching || inFlight || (scheduleLater && !scheduleValid)}
-                onClick={launch}
-              >
-                {launching
-                  ? scheduleLater
-                    ? 'Scheduling…'
-                    : 'Starting…'
-                  : scheduleLater
-                    ? `Schedule ${leads.length} for ${formatScheduled(scheduleAt)}`
-                    : autosend
-                      ? `Autosend ${leads.length}`
-                      : `Generate & review ${leads.length}`}
-              </button>
             </div>
-          ) : null}
+          </Step>
         </div>
       </div>
+
+      {leads.length && !inFlight ? (
+        <div className="launch-bar" style={{ marginTop: 20 }}>
+          <div className="launch-bar-copy">
+            <strong>
+              {leads.length} lead{leads.length === 1 ? '' : 's'} ready
+            </strong>
+            <span>
+              {scheduleLater
+                ? scheduleValid
+                  ? `Will start ${formatScheduled(scheduleAt)}`
+                  : 'Pick a time in the future'
+                : autosend
+                  ? 'Emails send automatically as they are written'
+                  : 'You review every email before it is sent'}
+            </span>
+          </div>
+          <button className="btn lg" type="button" disabled={!canLaunch} onClick={launch}>
+            {launchIcon} {launchLabel}
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }

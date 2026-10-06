@@ -1,188 +1,372 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  bundleIcon,
+  HomeFilled,
+  HomeRegular,
+  MailInboxFilled,
+  MailInboxRegular,
+  SendFilled,
+  SendRegular,
+  HistoryFilled,
+  HistoryRegular,
+  LibraryFilled,
+  LibraryRegular,
+  SettingsFilled,
+  SettingsRegular,
+  PeopleFilled,
+  PeopleRegular,
+  SparkleFilled,
+  SparkleRegular,
+  PaintBrushFilled,
+  PaintBrushRegular,
+  WandFilled,
+  WandRegular,
+  DocumentSearchFilled,
+  DocumentSearchRegular,
+  NavigationRegular,
+  SearchRegular,
+  SignOutRegular,
+  ShieldRegular,
+  DocumentTextRegular,
+  ChevronDownRegular,
+  QuestionCircleRegular,
+} from '@fluentui/react-icons'
 import { useAuth } from '../auth/AuthContext'
-import { useState, type ReactNode } from 'react'
+import { useCampaign } from '../campaign/CampaignContext'
+import { Avatar, BrandMark } from './ui'
 
-type NavItem = { to: string; label: string; icon: ReactNode; end?: boolean }
+const Home = bundleIcon(HomeFilled, HomeRegular)
+const Inbox = bundleIcon(MailInboxFilled, MailInboxRegular)
+const Campaigns = bundleIcon(SendFilled, SendRegular)
+const Runs = bundleIcon(HistoryFilled, HistoryRegular)
+const Catalogues = bundleIcon(LibraryFilled, LibraryRegular)
+const Settings = bundleIcon(SettingsFilled, SettingsRegular)
+const Users = bundleIcon(PeopleFilled, PeopleRegular)
+const Prompts = bundleIcon(SparkleFilled, SparkleRegular)
+const Design = bundleIcon(PaintBrushFilled, PaintBrushRegular)
+const Create = bundleIcon(WandFilled, WandRegular)
+const Rag = bundleIcon(DocumentSearchFilled, DocumentSearchRegular)
 
-function Icon({ children }: { children: ReactNode }) {
-  return (
-    <svg className="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      {children}
-    </svg>
-  )
+type NavItem = {
+  to: string
+  label: string
+  icon: typeof Home
+  end?: boolean
+  keywords?: string
 }
 
-const I = {
-  home: (
-    <Icon>
-      <path d="M3 10.5 12 3l9 7.5" />
-      <path d="M5 9.5V20h14V9.5" />
-    </Icon>
-  ),
-  inbox: (
-    <Icon>
-      <path d="M4 6h16v12H4z" />
-      <path d="m4 7 8 6 8-6" />
-    </Icon>
-  ),
-  campaigns: (
-    <Icon>
-      <path d="M5 19V5l14 7-14 7z" />
-    </Icon>
-  ),
-  catalogues: (
-    <Icon>
-      <path d="M4 5h7v14H4z" />
-      <path d="M13 5h7v14h-7z" />
-      <path d="M8 8h1M8 12h1M17 8h1M17 12h1" />
-    </Icon>
-  ),
-  settings: (
-    <Icon>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6" />
-    </Icon>
-  ),
-  users: (
-    <Icon>
-      <circle cx="9" cy="8" r="3" />
-      <path d="M3 19c0-3 2.7-5 6-5s6 2 6 5" />
-      <circle cx="17" cy="9" r="2.5" />
-      <path d="M21 19c0-2.2-1.8-4-4-4" />
-    </Icon>
-  ),
-  prompts: (
-    <Icon>
-      <path d="M12 3l1.4 4.2L18 9l-4.6 1.8L12 15l-1.4-4.2L6 9l4.6-1.8L12 3z" />
-      <path d="M18 14l.7 2.1L21 17l-2.3.9L18 20l-.7-2.1L15 17l2.3-.9L18 14z" />
-    </Icon>
-  ),
-  design: (
-    <Icon>
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4 11.5-11.5z" />
-    </Icon>
-  ),
-  create: (
-    <Icon>
-      <path d="M12 5v14M5 12h14" />
-    </Icon>
-  ),
-  runs: (
-    <Icon>
-      <path d="M12 7v5l3 2" />
-      <circle cx="12" cy="12" r="8" />
-    </Icon>
-  ),
-  rag: (
-    <Icon>
-      <circle cx="11" cy="11" r="6" />
-      <path d="m16 16 4 4" />
-    </Icon>
-  ),
-  chevron: (
-    <svg className="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  ),
-}
-
-const salesLinks: NavItem[] = [
-  { to: '/', label: 'Home', icon: I.home, end: true },
-  { to: '/inbox', label: 'Inbox', icon: I.inbox },
-  { to: '/campaigns', label: 'Campaigns', icon: I.campaigns, end: true },
-  { to: '/campaigns/runs', label: 'Campaign Runs', icon: I.runs },
-  { to: '/catalogues', label: 'Catalogues', icon: I.catalogues },
-  { to: '/settings', label: 'Settings', icon: I.settings },
+const workspaceLinks: NavItem[] = [
+  { to: '/', label: 'Home', icon: Home, end: true, keywords: 'dashboard overview' },
+  { to: '/inbox', label: 'Inbox', icon: Inbox, keywords: 'replies threads drafts mail' },
+  { to: '/campaigns', label: 'Campaigns', icon: Campaigns, end: true, keywords: 'new outreach leads send' },
+  { to: '/campaigns/runs', label: 'Campaign runs', icon: Runs, keywords: 'history scheduled' },
+  { to: '/catalogues', label: 'Catalogues', icon: Catalogues, keywords: 'pdf products library upload' },
+  { to: '/settings', label: 'Settings', icon: Settings, keywords: 'gmail sender profile' },
 ]
 
 const adminLinks: NavItem[] = [
-  { to: '/admin/users', label: 'Users', icon: I.users },
-  { to: '/admin/prompts', label: 'Prompt Studio', icon: I.prompts },
-  { to: '/admin/templates', label: 'Email Design', icon: I.design, end: true },
-  { to: '/admin/templates/create', label: 'Create with AI', icon: I.create },
-  { to: '/admin/rag', label: 'RAG Lab', icon: I.rag },
+  { to: '/admin/users', label: 'Users', icon: Users, keywords: 'team members invite' },
+  { to: '/admin/prompts', label: 'Prompt studio', icon: Prompts, keywords: 'ai prompts tone' },
+  { to: '/admin/templates', label: 'Email design', icon: Design, end: true, keywords: 'templates html' },
+  { to: '/admin/templates/create', label: 'Create with AI', icon: Create, keywords: 'template generate' },
+  { to: '/admin/rag', label: 'RAG lab', icon: Rag, keywords: 'grounding search chunks' },
 ]
 
-function NavGroup({ items }: { items: NavItem[] }) {
+function NavGroup({ items, collapsed, onNavigate }: { items: NavItem[]; collapsed: boolean; onNavigate: () => void }) {
   return (
-    <nav className="nav-list">
-      {items.map((l) => (
-        <NavLink
-          key={l.to}
-          to={l.to}
-          end={l.end}
-          className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
-        >
-          <span className="nav-ico-wrap">{l.icon}</span>
-          <span className="nav-label">{l.label}</span>
-        </NavLink>
-      ))}
-    </nav>
+    <ul className="nav-list">
+      {items.map((l) => {
+        const Icon = l.icon
+        return (
+          <li key={l.to}>
+            <NavLink
+              to={l.to}
+              end={l.end}
+              title={collapsed ? l.label : undefined}
+              onClick={onNavigate}
+              className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon className="nav-ico" filled={isActive} />
+                  <span className="nav-label">{l.label}</span>
+                </>
+              )}
+            </NavLink>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
-export function AppShell() {
-  const { me, logout } = useAuth()
-  const [adminOpen, setAdminOpen] = useState(true)
-  const initial = (me?.name || me?.email || 'S').trim().charAt(0).toUpperCase()
-  const isAdmin = me?.role === 'owner' || me?.role === 'admin'
+function useOutsideClose(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, close])
+  return ref
+}
+
+/** Header search — jumps to any page, like the Microsoft 365 search box. */
+function CommandSearch({ items }: { items: NavItem[] }) {
+  const nav = useNavigate()
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(0)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const wrapRef = useOutsideClose(open, () => setOpen(false))
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        inputRef.current?.focus()
+        setOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return items
+    return items.filter((i) => `${i.label} ${i.keywords || ''}`.toLowerCase().includes(q))
+  }, [items, query])
+
+  const go = (item?: NavItem) => {
+    if (!item) return
+    nav(item.to)
+    setQuery('')
+    setOpen(false)
+    inputRef.current?.blur()
+  }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand-block">
-          <div className="brand-mark">S</div>
-          <div className="brand-copy">
-            <div className="brand"><span>Starlight AI Mailer</span></div>
-            <div className="brand-sub">Linear LED</div>
-          </div>
+    <div className="topbar-search" ref={wrapRef}>
+      <SearchRegular className="topbar-search-icon" />
+      <input
+        ref={inputRef}
+        type="search"
+        placeholder="Search pages"
+        aria-label="Search pages"
+        value={query}
+        onFocus={() => setOpen(true)}
+        onChange={(e) => {
+          setQuery(e.target.value)
+          setActive(0)
+          setOpen(true)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setActive((a) => Math.min(a + 1, results.length - 1))
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setActive((a) => Math.max(a - 1, 0))
+          } else if (e.key === 'Enter') {
+            go(results[active])
+          }
+        }}
+      />
+      <kbd className="topbar-kbd">Ctrl K</kbd>
+      {open ? (
+        <div className="menu search-menu" role="listbox">
+          {results.length ? (
+            results.map((r, i) => {
+              const Icon = r.icon
+              return (
+                <button
+                  key={r.to}
+                  type="button"
+                  role="option"
+                  aria-selected={i === active}
+                  className={`menu-item${i === active ? ' active' : ''}`}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => go(r)}
+                >
+                  <Icon className="menu-ico" />
+                  {r.label}
+                </button>
+              )
+            })
+          ) : (
+            <div className="menu-empty">No pages match “{query}”</div>
+          )}
         </div>
+      ) : null}
+    </div>
+  )
+}
 
-        <div className="sidebar-scroll">
-          <div className="nav-group">
-            <div className="nav-section-label">Workspace</div>
-            <NavGroup items={salesLinks} />
-          </div>
+function AccountMenu() {
+  const { me, logout } = useAuth()
+  const [open, setOpen] = useState(false)
+  const ref = useOutsideClose(open, () => setOpen(false))
+  const name = me?.name || me?.email || 'Starlight user'
 
-          {isAdmin ? (
-            <div className="nav-group">
-              <button
-                type="button"
-                className={`nav-section-toggle${adminOpen ? ' open' : ''}`}
-                onClick={() => setAdminOpen((v) => !v)}
-                aria-expanded={adminOpen}
-              >
-                <span>Admin</span>
-                {I.chevron}
-              </button>
-              {adminOpen ? <NavGroup items={adminLinks} /> : null}
+  return (
+    <div className="account" ref={ref}>
+      <button
+        type="button"
+        className="topbar-btn account-btn"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Account manager"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Avatar name={name} size={30} />
+      </button>
+      {open ? (
+        <div className="menu account-menu" role="menu">
+          <div className="account-card">
+            <Avatar name={name} size={56} />
+            <div className="account-meta">
+              <strong>{me?.name || 'Starlight user'}</strong>
+              <span>{me?.email}</span>
+              {me?.role ? <span className="badge brand">{me.role}</span> : null}
             </div>
-          ) : null}
-        </div>
-
-        <div className="sidebar-foot">
-          <div className="user-chip">
-            <div className="avatar" aria-hidden>{initial}</div>
-            <div className="user-meta">
-              <div className="user-name">{me?.name || 'Starlight user'}</div>
-              <div className="user-email">{me?.email}</div>
-              {me?.role ? <div className="user-role">{me.role}</div> : null}
-            </div>
           </div>
-          <button type="button" className="btn-signout" onClick={logout}>
-            Sign out
+          <div className="menu-divider" />
+          <Link to="/settings" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
+            <SettingsRegular className="menu-ico" /> Settings
+          </Link>
+          <Link to="/privacy" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
+            <ShieldRegular className="menu-ico" /> Privacy policy
+          </Link>
+          <Link to="/terms" role="menuitem" className="menu-item" onClick={() => setOpen(false)}>
+            <DocumentTextRegular className="menu-ico" /> Terms of service
+          </Link>
+          <div className="menu-divider" />
+          <button type="button" role="menuitem" className="menu-item" onClick={logout}>
+            <SignOutRegular className="menu-ico" /> Sign out
           </button>
-          <div className="sidebar-legal">
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem('nav-collapsed') === '1'
+  } catch {
+    return false
+  }
+}
+
+export function AppShell() {
+  const { me } = useAuth()
+  const { status } = useCampaign()
+  const location = useLocation()
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(true)
+  const isAdmin = me?.role === 'owner' || me?.role === 'admin'
+  const campaignLive = status === 'running' || status === 'reviewing' || status === 'paused'
+
+  useEffect(() => setMobileOpen(false), [location.pathname])
+
+  const toggleNav = () => {
+    if (window.matchMedia('(max-width: 960px)').matches) {
+      setMobileOpen((v) => !v)
+      return
+    }
+    setCollapsed((v) => {
+      try {
+        localStorage.setItem('nav-collapsed', v ? '0' : '1')
+      } catch {
+        /* per-viewer convenience only */
+      }
+      return !v
+    })
+  }
+
+  const searchable = isAdmin ? [...workspaceLinks, ...adminLinks] : workspaceLinks
+  const closeMobile = () => setMobileOpen(false)
+
+  return (
+    <div className={`app-shell${collapsed ? ' nav-collapsed' : ''}${mobileOpen ? ' nav-mobile-open' : ''}`}>
+      <a href="#main" className="skip-link">Skip to content</a>
+      <header className="topbar">
+        <div className="topbar-left">
+          <button type="button" className="topbar-btn" aria-label="Toggle navigation" onClick={toggleNav}>
+            <NavigationRegular />
+          </button>
+          <Link to="/" className="topbar-brand">
+            <BrandMark size={24} />
+            <span className="topbar-product">Starlight AI Mailer</span>
+          </Link>
+        </div>
+        <CommandSearch items={searchable} />
+        <div className="topbar-right">
+          {campaignLive ? (
+            <Link
+              to={status === 'reviewing' ? '/campaigns/review' : '/campaigns/live'}
+              className="topbar-live"
+              title="A campaign is in progress"
+            >
+              <span className="live-dot" />
+              <span className="topbar-live-label">{status === 'paused' ? 'Campaign paused' : 'Campaign in progress'}</span>
+            </Link>
+          ) : null}
+          <a
+            className="topbar-btn"
+            href="mailto:info@starlightlinearled.com"
+            aria-label="Help and support"
+            title="Help and support"
+          >
+            <QuestionCircleRegular />
+          </a>
+          <AccountMenu />
+        </div>
+      </header>
+
+      <div className="shell-body">
+        <aside className="sidebar" aria-label="Main navigation">
+          <nav className="sidebar-scroll">
+            <NavGroup items={workspaceLinks} collapsed={collapsed} onNavigate={closeMobile} />
+            {isAdmin ? (
+              <div className="nav-group">
+                <button
+                  type="button"
+                  className={`nav-section-toggle${adminOpen ? ' open' : ''}`}
+                  onClick={() => setAdminOpen((v) => !v)}
+                  aria-expanded={adminOpen}
+                >
+                  <span className="nav-label">Admin</span>
+                  <ChevronDownRegular className="nav-chevron" />
+                </button>
+                {adminOpen || collapsed ? <NavGroup items={adminLinks} collapsed={collapsed} onNavigate={closeMobile} /> : null}
+              </div>
+            ) : null}
+          </nav>
+          <div className="sidebar-foot">
             <NavLink to="/privacy">Privacy</NavLink>
             <span aria-hidden>·</span>
             <NavLink to="/terms">Terms</NavLink>
           </div>
-        </div>
-      </aside>
-      <main className="main">
-        <Outlet />
-      </main>
+        </aside>
+        <div className="nav-scrim" onClick={closeMobile} aria-hidden />
+        <main className="main" id="main">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }
+

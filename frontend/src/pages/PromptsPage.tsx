@@ -1,6 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  ArrowUndoRegular,
+  BookDatabaseRegular,
+  ChatRegular,
+  DocumentSearchRegular,
+  GlobeSearchRegular,
+  MailRegular,
+  SaveRegular,
+  SparkleRegular,
+} from '@fluentui/react-icons'
 import { api } from '../api/client'
+import { EmptyState, MessageBar, PageHeader, Spinner, useConfirm, useToast } from '../components/ui'
 
 const CATEGORY_ORDER = ['email', 'scraping', 'rag', 'knowledge_base', 'conversation']
 
@@ -10,6 +21,14 @@ const CATEGORY_LABELS: Record<string, string> = {
   rag: 'RAG',
   knowledge_base: 'Knowledge',
   conversation: 'Conversation',
+}
+
+const CATEGORY_ICONS: Record<string, ReactNode> = {
+  email: <MailRegular />,
+  scraping: <GlobeSearchRegular />,
+  rag: <DocumentSearchRegular />,
+  knowledge_base: <BookDatabaseRegular />,
+  conversation: <ChatRegular />,
 }
 
 function categoryLabel(c: string) {
@@ -25,11 +44,12 @@ type PromptItem = {
 }
 
 export function PromptsPage() {
+  const toast = useToast()
+  const confirm = useConfirm()
   const q = useQuery({ queryKey: ['prompts'], queryFn: api.prompts })
   const [category, setCategory] = useState('email')
   const [selectedKey, setSelectedKey] = useState('')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -62,6 +82,7 @@ export function PromptsPage() {
   const selected = prompts.find((p) => p.key === selectedKey) || null
   const draftValue = selected ? drafts[selected.key] ?? selected.content : ''
   const dirty = selected ? draftValue !== selected.content : false
+  const dirtyCount = allPrompts.filter((p) => (drafts[p.key] ?? p.content) !== p.content).length
 
   const save = async () => {
     if (!selected || !dirty) return
@@ -69,18 +90,29 @@ export function PromptsPage() {
     setError('')
     try {
       await api.updatePrompt(selected.key, draftValue)
-      setMsg(`Saved “${selected.label}”`)
+      toast.success('Prompt saved', selected.label)
       await q.refetch()
+      setDrafts((prev) => {
+        const next = { ...prev }
+        delete next[selected.key]
+        return next
+      })
     } catch (e: any) {
       setError(e.message || 'Save failed')
-      setMsg('')
     } finally {
       setSaving(false)
     }
   }
 
-  const revert = () => {
+  const revert = async () => {
     if (!selected) return
+    const ok = await confirm({
+      title: 'Discard changes?',
+      body: `Your edits to “${selected.label}” will be lost.`,
+      confirmLabel: 'Discard',
+      danger: true,
+    })
+    if (!ok) return
     setDrafts((prev) => {
       const next = { ...prev }
       delete next[selected.key]
@@ -88,107 +120,136 @@ export function PromptsPage() {
     })
   }
 
-  return (
-    <div className="studio-screen">
-      <div className="page-hero">
-        <div>
-          <h1>Prompt Studio</h1>
-          <p>Tune Starlight’s voice across scraping, RAG, email writing, and replies.</p>
-        </div>
-        {msg ? <span className="pill ok">{msg}</span> : null}
-      </div>
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        void save()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
-      <div className="studio-tabs" role="tablist" aria-label="Prompt categories">
+  const lines = draftValue ? draftValue.split('\n').length : 0
+
+  return (
+    <div>
+      <PageHeader
+        breadcrumb={[{ label: 'Admin' }, { label: 'Prompt studio' }]}
+        title="Prompt studio"
+        subtitle="Tune Starlight’s voice across scraping, RAG, email writing and replies."
+        actions={dirtyCount ? <span className="badge warning lg">{dirtyCount} unsaved</span> : null}
+      />
+
+      <div className="tablist" role="tablist" aria-label="Prompt categories">
         {categories.map((c) => (
           <button
             key={c}
             type="button"
             role="tab"
             aria-selected={category === c}
-            className={`studio-tab${category === c ? ' active' : ''}`}
+            className={`tab${category === c ? ' active' : ''}`}
             onClick={() => setCategory(c)}
           >
+            {CATEGORY_ICONS[c] || <SparkleRegular />}
             {categoryLabel(c)}
-            <span className="studio-tab-count">
-              {allPrompts.filter((p) => p.category === c).length}
-            </span>
+            <span className="tab-count">{allPrompts.filter((p) => p.category === c).length}</span>
           </button>
         ))}
       </div>
 
       {q.isLoading ? (
-        <div className="panel empty-state">Loading prompts…</div>
+        <div className="card center-fill">
+          <Spinner label="Loading prompts…" />
+        </div>
+      ) : q.isError ? (
+        <MessageBar intent="error" title="Couldn't load prompts">{(q.error as Error).message}</MessageBar>
       ) : !prompts.length ? (
-        <div className="panel empty-state">
-          <strong>No prompts in {categoryLabel(category)}</strong>
-          <p className="muted">Pick another category above.</p>
+        <div className="card">
+          <EmptyState
+            icon={<SparkleRegular />}
+            title={`No prompts in ${categoryLabel(category)}`}
+            description="Pick another category above."
+          />
         </div>
       ) : (
-        <div className="studio-body">
-          <aside className="studio-nav panel stack">
-            <div className="studio-nav-label muted">Prompts</div>
-            <div className="studio-nav-list">
+        <div className="studio">
+          <nav className="card studio-nav" aria-label="Prompts">
+            <div className="studio-nav-label">{categoryLabel(category)} prompts</div>
+            <div className="vnav">
               {prompts.map((p) => {
                 const isDirty = (drafts[p.key] ?? p.content) !== p.content
                 return (
                   <button
                     key={p.key}
                     type="button"
-                    className={`studio-nav-item${selectedKey === p.key ? ' active' : ''}`}
+                    className={`vnav-item${selectedKey === p.key ? ' active' : ''}`}
+                    aria-current={selectedKey === p.key ? 'page' : undefined}
                     onClick={() => setSelectedKey(p.key)}
                   >
-                    <span className="studio-nav-title">{p.label}</span>
-                    <span className="studio-nav-key muted">{p.key}</span>
-                    {isDirty ? <span className="studio-dirty" title="Unsaved changes" /> : null}
+                    <span className="vnav-copy">
+                      <span className="vnav-title">{p.label}</span>
+                      <span className="vnav-sub mono">{p.key}</span>
+                    </span>
+                    {isDirty ? <span className="dirty-dot" title="Unsaved changes" /> : null}
                   </button>
                 )
               })}
             </div>
-          </aside>
+          </nav>
 
           {selected ? (
-            <div className="studio-editor panel stack">
-              <div className="studio-editor-head">
-                <div style={{ minWidth: 0 }}>
-                  <h2>{selected.label}</h2>
-                  {selected.description ? (
-                    <p className="muted">{selected.description}</p>
-                  ) : null}
-                  <code className="studio-key">{selected.key}</code>
+            <section className="card studio-editor">
+              <div className="card-header">
+                <div className="card-header-copy">
+                  <h2 className="card-title">{selected.label}</h2>
+                  {selected.description ? <p className="card-subtitle">{selected.description}</p> : null}
+                  <code className="inline" style={{ display: 'inline-block', marginTop: 6 }}>{selected.key}</code>
                 </div>
-                <div className="row" style={{ flexShrink: 0 }}>
-                  {dirty ? (
-                    <button className="btn secondary" type="button" disabled={saving} onClick={revert}>
-                      Discard
-                    </button>
-                  ) : null}
+                <div className="card-header-actions">
+                  <button className="btn secondary" type="button" disabled={saving || !dirty} onClick={revert}>
+                    <ArrowUndoRegular /> Discard
+                  </button>
                   <button className="btn" type="button" disabled={saving || !dirty} onClick={save}>
-                    {saving ? 'Saving…' : dirty ? 'Save prompt' : 'Saved'}
+                    {saving ? <Spinner size="sm" /> : <SaveRegular />}
+                    {saving ? 'Saving…' : 'Save'}
                   </button>
                 </div>
               </div>
 
               {error ? (
-                <div className="alert danger">
-                  <strong>Save failed</strong>
-                  <div style={{ marginTop: 4 }}>{error}</div>
-                </div>
+                <MessageBar intent="error" title="Save failed" onDismiss={() => setError('')}>
+                  {error}
+                </MessageBar>
               ) : null}
 
               {selected.key === 'draft_system' ? (
-                <div className="alert warn" style={{ margin: 0 }}>
-                  Keep JSON keys <code>subject, preamble, opening_line, intro, feature_highlights, use_cases, cta</code>.
-                  <code>opening_line</code> should greet the client from CLIENT DATA (Hey {'{client}'}, …). Changing key names empties campaign emails.
-                </div>
+                <MessageBar intent="warning" title="Keep the JSON keys">
+                  <span>
+                    The output must keep <code className="inline">subject, preamble, opening_line, intro, feature_highlights, use_cases, cta</code>.{' '}
+                    <code className="inline">opening_line</code> should greet the client from CLIENT DATA (Hey {'{client}'}, …).
+                    Renaming keys empties campaign emails.
+                  </span>
+                </MessageBar>
               ) : null}
 
               <textarea
-                className="textarea studio-textarea"
+                className="code-editor"
                 value={draftValue}
                 spellCheck={false}
+                aria-label={`${selected.label} prompt`}
                 onChange={(e) => setDrafts({ ...drafts, [selected.key]: e.target.value })}
               />
-            </div>
+              <div className="editor-status">
+                <span>
+                  {dirty ? 'Unsaved changes' : 'All changes saved'} · {lines} lines · {draftValue.length.toLocaleString()} characters
+                </span>
+                <span>
+                  <kbd className="kbd">Ctrl</kbd> + <kbd className="kbd">S</kbd> to save
+                </span>
+              </div>
+            </section>
           ) : null}
         </div>
       )}

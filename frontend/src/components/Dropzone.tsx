@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react'
+import { CloudArrowUpRegular } from '@fluentui/react-icons'
+import { Spinner } from './ui'
 
 type Props = {
   accept: string
@@ -14,7 +16,10 @@ export function Dropzone({ accept, multiple = false, title, hint, busy = false, 
   const [over, setOver] = useState(false)
 
   const handle = (files: FileList | null) => {
-    if (files?.length) onFiles(files)
+    if (files?.length && !busy) onFiles(files)
+  }
+  const browse = () => {
+    if (!busy) inputRef.current?.click()
   }
 
   return (
@@ -30,16 +35,30 @@ export function Dropzone({ accept, multiple = false, title, hint, busy = false, 
         setOver(false)
         handle(e.dataTransfer.files)
       }}
-      onClick={() => inputRef.current?.click()}
+      onClick={browse}
       role="button"
       tabIndex={0}
+      aria-disabled={busy}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') inputRef.current?.click()
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          browse()
+        }
       }}
     >
-      <div className="dropzone-icon">{busy ? '⏳' : '⬆'}</div>
+      {busy ? (
+        <Spinner size="lg" />
+      ) : (
+        <CloudArrowUpRegular className="dropzone-icon" />
+      )}
       <strong>{busy ? 'Working…' : title}</strong>
-      <span className="muted">{hint}</span>
+      <span className="dropzone-hint">
+        {busy ? 'You can keep using the app while this finishes.' : (
+          <>
+            or <span className="dropzone-browse">browse your files</span> · {hint}
+          </>
+        )}
+      </span>
       <input
         ref={inputRef}
         type="file"

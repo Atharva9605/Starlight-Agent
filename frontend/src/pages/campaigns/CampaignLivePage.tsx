@@ -1,13 +1,35 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
+import {
+  AddRegular,
+  ArrowClockwiseRegular,
+  ArrowRightRegular,
+  CheckmarkCircleFilled,
+  CheckmarkRegular,
+  CircleRegular,
+  DismissCircleFilled,
+  DocumentPdfRegular,
+  ErrorCircleRegular,
+  GlobeSearchRegular,
+  MailInboxRegular,
+  MailRegular,
+  PauseRegular,
+  PlayRegular,
+  SendRegular,
+  SkipForwardTabRegular,
+  SparkleRegular,
+  StopRegular,
+  ClockRegular,
+} from '@fluentui/react-icons'
 import { EmailPreviewFrame } from '../../components/EmailPreviewFrame'
 import { leadState, useCampaign, type StageEvent } from '../../campaign/CampaignContext'
+import { CardHeader, MessageBar, PageHeader, Spinner, useConfirm } from '../../components/ui'
 
 const STAGE_ORDER = ['queued', 'discover', 'scrape', 'analyze', 'retrieve', 'draft', 'render', 'send'] as const
 
 const STAGE_LABELS: Record<string, string> = {
   queued: 'Queued',
-  discover: 'OpenSERP',
+  discover: 'Find website',
   scrape: 'Scrape',
   analyze: 'Analyze',
   retrieve: 'Catalogue',
@@ -64,9 +86,25 @@ function leadTitle(lead: Record<string, any> | undefined, fallback: string): str
   return lead?.company || lead?.name || lead?.website || fallback
 }
 
-/** Live progress logs — full journey including OpenSERP, review & send. */
+function StageIcon({ state }: { state: string }) {
+  if (state === 'done') return <CheckmarkCircleFilled className="step-item-icon" />
+  if (state === 'error') return <DismissCircleFilled className="step-item-icon" />
+  if (state === 'active') return <Spinner size="sm" />
+  return <CircleRegular className="step-item-icon" />
+}
+
+function stateBadge(st: string, showDiscover: boolean) {
+  if (st === 'sent') return 'success'
+  if (st === 'failed') return 'danger'
+  if (st === 'processing' || st === 'ready') return 'brand'
+  if (showDiscover && st === 'pending') return 'teal'
+  return ''
+}
+
+/** Live progress — full journey including website lookup, review & send. */
 export function CampaignLivePage() {
   const nav = useNavigate()
+  const confirm = useConfirm()
   const {
     leads,
     status,
@@ -99,7 +137,7 @@ export function CampaignLivePage() {
   const chatEnd = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
+    chatEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [chat.length, revising])
 
   useEffect(() => {
@@ -130,12 +168,11 @@ export function CampaignLivePage() {
 
   if (attaching) {
     return (
-      <div className="dash-screen">
-        <div className="panel stack">
-          <strong style={{ fontFamily: 'var(--display)' }}>Rejoining your campaign…</strong>
-          <p className="muted">
-            It has been running on the server this whole time. Picking up where it is now.
-          </p>
+      <div className="center-fill" style={{ minHeight: '50vh' }}>
+        <div className="empty-state">
+          <Spinner size="lg" />
+          <strong className="empty-title" style={{ marginTop: 12 }}>Rejoining your campaign…</strong>
+          <p className="empty-desc">It has been running on the server the whole time. Picking up where it is now.</p>
         </div>
       </div>
     )
@@ -161,11 +198,9 @@ export function CampaignLivePage() {
   const fromLabel = livePreview?.from || runSender || 'Starlight Linear LED'
   const productSheet = livePreview?.productSheet || focus?._product_sheet || ''
   const productCount = livePreview?.productCount ?? focus?._product_count ?? 0
-  const activeStep = timeline.find((s) => s.state === 'active') || timeline.find((s) => s.state === 'pending')
   const canReview = !!draft && draft.rowIndex === focusIdx && focusState === 'ready'
-  const pathHint = includeDiscover
-    ? 'Company → OpenSERP → scrape → draft → send'
-    : 'Website → scrape → draft → send'
+  const showReview =
+    canReview || (generating && draft?.rowIndex === focusIdx) || (generating && currentIndex === focusIdx)
 
   const onChat = async (e: FormEvent) => {
     e.preventDefault()
@@ -175,58 +210,69 @@ export function CampaignLivePage() {
     await reviseCurrent(msg)
   }
 
+  const onStop = async () => {
+    const ok = await confirm({
+      title: 'Stop this campaign?',
+      body: `Emails already sent stay sent. The ${left} lead${left === 1 ? '' : 's'} left won't be contacted unless you resume later from Campaign runs.`,
+      confirmLabel: 'Stop campaign',
+      danger: true,
+    })
+    if (ok) stop()
+  }
+
   const finished = status === 'done' || status === 'stopped' || status === 'failed'
   // A resume picks up the untouched leads and retries the failures.
   const retriable = left + counts.failed
 
   const headline = (() => {
-    if (running || generating) return `Working lead ${focusIdx + 1} of ${counts.total}`
+    if (running || generating) return `Working on lead ${focusIdx + 1} of ${counts.total}`
     if (paused) return 'Campaign paused'
     if (canReview) return `Review lead ${focusIdx + 1} of ${counts.total}`
     if (status === 'stopped') return 'Campaign stopped'
     if (status === 'done' && left > 0) return `${left} lead${left === 1 ? '' : 's'} still waiting`
     if (status === 'done') return 'Campaign complete'
     if (status === 'failed') return 'Campaign failed'
-    return 'Live progress logs'
+    return 'Live progress'
   })()
 
+  const railSteps = timeline.filter((s) => s.id !== 'error')
+
   return (
-    <div className="dash-screen">
-      <header className="dash-hero">
-        <div>
-          <div className="dash-kicker">
-            {activeRun ? <span className="live-dot" /> : null}
-            Live progress logs
-          </div>
-          <h1>{headline}</h1>
-          <p className="muted">
+    <div>
+      <PageHeader
+        breadcrumb={[{ label: 'Campaigns', to: '/campaigns' }, { label: 'Live progress' }]}
+        kicker={
+          activeRun ? (
+            <><span className="live-dot" /> Live</>
+          ) : paused ? (
+            <span className="badge warning">Paused</span>
+          ) : null
+        }
+        title={headline}
+        subtitle={
+          <>
             {counts.sent} sent · {counts.failed} failed · {counts.processing + counts.ready} in progress
             {left ? ` · ${left} left` : ''}
             {draft?.to ? ` · to ${draft.to}` : runSender ? ` · from ${runSender}` : ''}
-          </p>
-          {runId && activeRun ? (
-            <p className="muted" style={{ marginTop: 4, fontSize: 13 }}>
-              Running on the server — you can close this tab and it keeps sending.
-            </p>
-          ) : null}
-        </div>
-        <div className="row">
-          {paused ? (
+          </>
+        }
+        actions={
+          paused ? (
             <>
-              <button className="btn" type="button" onClick={() => void resume()} disabled={sending}>
-                Resume
+              <button className="btn danger-outline" type="button" onClick={onStop} disabled={sending}>
+                <StopRegular /> Stop
               </button>
-              <button className="btn secondary" type="button" onClick={stop} disabled={sending}>
-                Stop
+              <button className="btn" type="button" onClick={() => void resume()} disabled={sending}>
+                <PlayRegular /> Resume
               </button>
             </>
           ) : activeRun || canReview ? (
             <>
-              <button className="btn secondary" type="button" onClick={pause} disabled={sending}>
-                Pause
+              <button className="btn danger-outline" type="button" onClick={onStop} disabled={sending}>
+                <StopRegular /> Stop
               </button>
-              <button className="btn danger" type="button" onClick={stop} disabled={sending}>
-                Stop
+              <button className="btn secondary" type="button" onClick={pause} disabled={sending}>
+                <PauseRegular /> Pause
               </button>
             </>
           ) : (
@@ -239,213 +285,191 @@ export function CampaignLivePage() {
                   nav('/campaigns')
                 }}
               >
-                New campaign
+                <AddRegular /> New campaign
               </button>
               {runId && finished ? (
                 <Link to={`/campaigns/runs/${runId}`} className="btn">
-                  See the whole run
+                  See the whole run <ArrowRightRegular />
                 </Link>
               ) : (
                 <Link to="/inbox" className="btn">
-                  Inbox
+                  <MailInboxRegular /> Inbox
                 </Link>
               )}
             </>
-          )}
-        </div>
-      </header>
+          )
+        }
+      />
 
-      {runId && finished ? (
-        <div className="panel stack">
-          <strong style={{ fontFamily: 'var(--display)' }}>
-            {status === 'done'
-              ? `Campaign finished — ${counts.sent} email${counts.sent === 1 ? '' : 's'} sent`
-              : status === 'stopped'
-                ? 'Campaign stopped'
-                : 'Campaign failed'}
-          </strong>
-          <p className="muted" style={{ margin: 0 }}>
-            The full record is kept: every lead, the email it received, and the activity log.
-            {retriable
-              ? ` ${retriable} lead${retriable === 1 ? '' : 's'} were not sent — you can resume them.`
-              : ''}
-          </p>
-          <div className="row" style={{ gap: 8 }}>
-            <Link to={`/campaigns/runs/${runId}`} className="btn">
-              See the whole run
-            </Link>
-            {retriable ? (
-              <button className="btn secondary" type="button" onClick={() => void resume()}>
-                Resume the {retriable} left
-              </button>
-            ) : null}
-            <Link to="/campaigns/runs" className="btn secondary">
-              All runs
-            </Link>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="dash-progress panel">
-        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 10, gap: 12 }}>
-          <div>
-            <strong style={{ fontSize: 15 }}>{pct}% complete</strong>
-            <span className="muted" style={{ marginLeft: 10, fontSize: 13 }}>
-              {counts.processed} finished · {Math.max(0, counts.pending)} waiting
-            </span>
-          </div>
-          <div className="row" style={{ gap: 6 }}>
-            {includeDiscover ? <span className="pill discover">OpenSERP path</span> : <span className="pill">Website path</span>}
-            {activeStep ? <span className="pill warn">{activeStep.label}</span> : null}
-          </div>
-        </div>
-        <div className="progress thick">
-          <div className={`progress-fill${activeRun ? ' animated' : ''}`} style={{ width: `${pct}%` }} />
-        </div>
-        <p className="muted" style={{ margin: '0.65rem 0 0', fontSize: 12 }}>
-          Journey for this lead: {pathHint}
-        </p>
-        <ol className="dash-rail" style={{ ['--rail-cols' as string]: timeline.filter((s) => s.id !== 'error').length }}>
-          {timeline
-            .filter((s) => s.id !== 'error')
-            .map((step) => (
-              <li key={step.id} className={`dash-rail-step ${step.state}${step.id === 'discover' ? ' discover' : ''}`}>
-                <span className="dash-rail-dot" />
-                <span className="dash-rail-label">{STAGE_LABELS[step.id] || step.id}</span>
-              </li>
-            ))}
-        </ol>
+      <div className="page-alerts">
+        {runId && activeRun ? (
+          <MessageBar intent="info">Running on the server — you can close this tab and it keeps sending.</MessageBar>
+        ) : null}
+        {runId && finished ? (
+          <MessageBar
+            intent={status === 'done' && !retriable ? 'success' : status === 'failed' ? 'error' : 'warning'}
+            title={
+              status === 'done'
+                ? `Campaign finished — ${counts.sent} email${counts.sent === 1 ? '' : 's'} sent`
+                : status === 'stopped'
+                  ? 'Campaign stopped'
+                  : 'Campaign failed'
+            }
+            actions={
+              <>
+                {retriable ? (
+                  <button className="btn secondary sm" type="button" onClick={() => void resume()}>
+                    <ArrowClockwiseRegular /> Resume {retriable} left
+                  </button>
+                ) : null}
+                <Link to="/campaigns/runs" className="btn subtle sm">All runs</Link>
+              </>
+            }
+          >
+            Every lead, the email it received and the activity log are kept.
+            {retriable ? ` ${retriable} lead${retriable === 1 ? ' was' : 's were'} not sent.` : ''}
+          </MessageBar>
+        ) : null}
       </div>
 
-      <div className="dash-grid">
-        <section className="dash-preview panel stack">
-          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <div className="design-preview-label muted">Live email preview</div>
-              <h2 style={{ margin: '0.2rem 0 0', fontFamily: 'var(--display)', fontSize: '1.25rem' }}>
-                {leadTitle(draft || focus, `Lead ${focusIdx + 1}`)}
-              </h2>
-              {(draft?.website || focus?.website) && (
-                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: 13 }}>
-                  {draft?.website || focus?.website}
-                  {focus?._discovered || includeDiscover ? (
-                    <span className="pill discover" style={{ marginLeft: 8, verticalAlign: 'middle' }}>
-                      via OpenSERP
-                    </span>
-                  ) : null}
-                </p>
-              )}
-              {!focus?.website && (focus?.company || focus?.name) && generating ? (
-                <p className="muted" style={{ margin: '0.25rem 0 0', fontSize: 13 }}>
-                  Looking up website for <strong>{focus.company || focus.name}</strong>…
-                </p>
-              ) : null}
-            </div>
-            <div className="row" style={{ gap: 6 }}>
-              {productSheet ? <span className="pill ok">PDF sheet attached</span> : null}
-              {productCount ? <span className="pill">{productCount} products</span> : null}
-              <span
-                className={`pill ${
-                  focusState === 'sent' ? 'ok' : focusState === 'failed' ? 'pink' : 'warn'
-                }`}
-              >
-                {focus?._status || 'Queued'}
-              </span>
-            </div>
+      <section className="card" style={{ marginBottom: 20 }}>
+        <div className="row between" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ gap: 10 }}>
+            <strong style={{ fontSize: 20, lineHeight: '28px' }}>{pct}%</strong>
+            <span className="muted text-sm">
+              {counts.processed} of {counts.total} finished · {Math.max(0, counts.pending)} waiting
+            </span>
           </div>
+          {includeDiscover ? (
+            <span className="badge teal"><GlobeSearchRegular /> Website lookup</span>
+          ) : (
+            <span className="badge">Website provided</span>
+          )}
+        </div>
+        <div className={`progress thick${activeRun && pct === 0 ? ' indeterminate' : ''}`}>
+          <div className={`progress-fill${status === 'done' ? ' success' : ''}`} style={activeRun && pct === 0 ? undefined : { width: `${pct}%` }} />
+        </div>
+        <ol className="stage-rail" style={{ marginTop: 20 }} aria-label={`Stages for ${leadTitle(focus, `lead ${focusIdx + 1}`)}`}>
+          {railSteps.map((step) => (
+            <li key={step.id} className={`stage ${step.state}`}>
+              <span className="stage-dot">
+                {step.state === 'done' ? <CheckmarkRegular /> : step.state === 'error' ? <DismissCircleFilled /> : null}
+              </span>
+              <span className="stage-label">{STAGE_LABELS[step.id] || step.id}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <div className="dash-grid">
+        <section className="card dash-preview">
+          <CardHeader
+            icon={<MailRegular />}
+            title={leadTitle(draft || focus, `Lead ${focusIdx + 1}`)}
+            subtitle={
+              draft?.website || focus?.website
+                ? `${draft?.website || focus?.website}${focus?._discovered || includeDiscover ? ' · found by website lookup' : ''}`
+                : !focus?.website && (focus?.company || focus?.name) && generating
+                  ? `Looking up the website for ${focus.company || focus.name}…`
+                  : undefined
+            }
+            actions={
+              <>
+                {productSheet ? <span className="badge success"><DocumentPdfRegular /> PDF attached</span> : null}
+                {productCount ? <span className="badge">{productCount} products</span> : null}
+                <span className={`badge ${stateBadge(focusState, false) || 'warning'}`}>{focus?._status || 'Queued'}</span>
+              </>
+            }
+          />
 
           {previewHtml ? (
             <div className="dash-preview-frame">
-              <EmailPreviewFrame
-                html={previewHtml}
-                subject={previewSubject}
-                fromLabel={fromLabel}
-                fullscreen
-              />
+              <EmailPreviewFrame html={previewHtml} subject={previewSubject} fromLabel={fromLabel} fullscreen deviceToggle />
             </div>
           ) : (
-            <div className="skeleton-frame tall live-preview-empty">
-              <div className="live-pulse-ring" />
+            <div className="preview-empty">
+              {generating || running ? <Spinner size="lg" /> : <MailRegular className="preview-empty-icon" />}
               <strong>
                 {generating && includeDiscover
-                  ? 'OpenSERP is finding the company website…'
+                  ? 'Finding the company website…'
                   : generating || running
-                    ? 'Generating this email…'
+                    ? 'Writing this email…'
                     : status === 'idle'
-                      ? 'Start the campaign from Campaigns to begin'
-                      : 'Preview appears here as each email is written'}
+                      ? 'Start the campaign to begin'
+                      : 'The preview appears as each email is written'}
               </strong>
-              <p className="muted" style={{ margin: '0.4rem 0 0', maxWidth: '42ch' }}>
-                If the sheet has a website we scrape it; if only a company name is present we resolve it with OpenSERP, then continue the same journey.
+              <p>
+                With a website we scrape it directly; with only a company name we look the website up first, then
+                continue the same journey.
               </p>
             </div>
           )}
         </section>
 
         <aside className="dash-side">
-          {canReview || (generating && draft?.rowIndex === focusIdx) || (generating && currentIndex === focusIdx) ? (
-            <div className="panel stack">
-              <strong style={{ fontFamily: 'var(--display)' }}>Review & send</strong>
-              <div className="chat-log" style={{ maxHeight: 160 }}>
-                {chat.map((m, i) => (
-                  <div key={i} className={`chat-bubble ${m.role}`}>
-                    {m.content}
+          {showReview ? (
+            <section className="card">
+              <CardHeader icon={<SparkleRegular />} title="Review & send" subtitle="Ask for changes, then send or skip." />
+              <div className="stack" style={{ marginTop: 12 }}>
+                {chat.length || revising ? (
+                  <div className="chat-log" style={{ maxHeight: 180 }}>
+                    {chat.map((m, i) => (
+                      <div key={i} className={`chat-bubble ${m.role}`}>
+                        {m.content}
+                      </div>
+                    ))}
+                    {revising ? <div className="chat-bubble assistant"><Spinner size="sm" label="Updating…" /></div> : null}
+                    <div ref={chatEnd} />
                   </div>
-                ))}
-                {revising ? <div className="chat-bubble assistant">Updating…</div> : null}
-                <div ref={chatEnd} />
+                ) : null}
+                <form className="chat-compose" onSubmit={onChat}>
+                  <input
+                    className="input"
+                    placeholder={draft ? 'e.g. Make the call to action softer' : 'Waiting for the draft…'}
+                    aria-label="Ask for a change"
+                    value={input}
+                    disabled={!draft || busy}
+                    onChange={(e) => setInput(e.target.value)}
+                  />
+                  <button
+                    className="btn secondary icon-only"
+                    type="submit"
+                    aria-label="Update email"
+                    title="Update email"
+                    disabled={!draft || busy || !input.trim()}
+                  >
+                    <SparkleRegular />
+                  </button>
+                </form>
+                <div className="row nowrap">
+                  <button className="btn secondary grow" type="button" disabled={!draft || busy} onClick={() => void skipCurrent()}>
+                    <SkipForwardTabRegular /> Skip
+                  </button>
+                  <button className="btn grow" type="button" disabled={!draft || busy} onClick={() => void sendCurrent()}>
+                    {sending ? <Spinner size="sm" /> : <SendRegular />}
+                    {sending ? 'Sending…' : 'Send'}
+                  </button>
+                </div>
               </div>
-              <form className="chat-compose" onSubmit={onChat}>
-                <input
-                  className="input"
-                  placeholder={draft ? 'e.g. Make the CTA softer…' : 'Waiting for draft…'}
-                  value={input}
-                  disabled={!draft || busy}
-                  onChange={(e) => setInput(e.target.value)}
-                />
-                <button className="btn secondary" type="submit" disabled={!draft || busy || !input.trim()}>
-                  Update
-                </button>
-              </form>
-              <div className="row" style={{ gap: 8 }}>
-                <button
-                  className="btn secondary"
-                  type="button"
-                  style={{ flex: 1 }}
-                  disabled={!draft || busy}
-                  onClick={() => void skipCurrent()}
-                >
-                  Skip
-                </button>
-                <button
-                  className="btn"
-                  type="button"
-                  style={{ flex: 1.4 }}
-                  disabled={!draft || busy}
-                  onClick={() => void sendCurrent()}
-                >
-                  {sending ? 'Sending…' : 'Send'}
-                </button>
-              </div>
-            </div>
+            </section>
           ) : null}
 
-          <div className="panel stack">
-            <strong style={{ fontFamily: 'var(--display)' }}>This email</strong>
-            <ul className="dash-detail-list">
+          <section className="card">
+            <CardHeader title="This email" />
+            <ul className="step-list" style={{ marginTop: 8 }}>
               {timeline.map((step) => (
-                <li key={step.id} className={`dash-detail ${step.state}${step.id === 'discover' ? ' discover' : ''}`}>
-                  <span className="dash-detail-mark" />
+                <li key={step.id} className={`step-item ${step.state}`}>
+                  <StageIcon state={step.state} />
                   <div>
-                    <div className="dash-detail-title">{step.label}</div>
-                    <div className="muted" style={{ fontSize: 12 }}>
+                    <div className="step-item-title">{step.label}</div>
+                    <div className="step-item-sub">
                       {step.state === 'done'
                         ? 'Done'
                         : step.state === 'active'
                           ? step.id === 'send' && canReview
-                            ? 'Ready — hit Send'
+                            ? 'Ready — select Send'
                             : step.id === 'discover'
-                              ? 'Searching OpenSERP…'
+                              ? 'Searching the web…'
                               : 'Running now'
                           : step.state === 'error'
                             ? 'Error'
@@ -455,11 +479,25 @@ export function CampaignLivePage() {
                 </li>
               ))}
             </ul>
-          </div>
+          </section>
 
-          <div className="panel stack">
-            <strong style={{ fontFamily: 'var(--display)' }}>Lead queue</strong>
-            <div className="queue dash-queue">
+          <section className="card">
+            <CardHeader title="Lead queue" subtitle={`${counts.total} leads`} />
+            <div className="kpi-grid compact" style={{ margin: '12px 0' }}>
+              <div className="kpi">
+                <span className="kpi-icon success"><SendRegular /></span>
+                <div className="kpi-copy"><div className="kpi-label">Sent</div><div className="kpi-value">{counts.sent}</div></div>
+              </div>
+              <div className="kpi">
+                <span className="kpi-icon danger"><ErrorCircleRegular /></span>
+                <div className="kpi-copy"><div className="kpi-label">Failed</div><div className="kpi-value">{counts.failed}</div></div>
+              </div>
+              <div className="kpi">
+                <span className="kpi-icon neutral"><ClockRegular /></span>
+                <div className="kpi-copy"><div className="kpi-label">Left</div><div className="kpi-value">{left}</div></div>
+              </div>
+            </div>
+            <div className="queue">
               {leads.map((l, i) => {
                 const st = leadState(l)
                 const showDiscover = leadNeedsDiscover(l, stagesByLead[i])
@@ -468,62 +506,32 @@ export function CampaignLivePage() {
                   <button
                     key={i}
                     type="button"
-                    className={`queue-row queue-row-btn${i === focusIdx ? ' active' : ''}`}
+                    className={`queue-row${i === focusIdx ? ' active' : ''}`}
+                    aria-current={i === focusIdx ? 'true' : undefined}
                     onClick={() => setFocusOverride(i)}
                   >
                     <span className={`queue-index ${st}`}>{i + 1}</span>
                     <span className="queue-name">
-                      {leadTitle(l, `Lead ${i + 1}`)}
-                      <span className="muted" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
-                        {l.website
-                          ? l.website.replace(/^https?:\/\//, '')
-                          : showDiscover
-                            ? 'OpenSERP lookup'
-                            : stage}
+                      <strong>{leadTitle(l, `Lead ${i + 1}`)}</strong>
+                      <span>
+                        {l.website ? l.website.replace(/^https?:\/\//, '') : showDiscover ? 'Website lookup' : stage}
                         {l.website && stage ? ` · ${stage}` : !l.website && stage && showDiscover ? ` · ${stage}` : ''}
                       </span>
                     </span>
-                    <span
-                      className={`pill ${
-                        st === 'sent'
-                          ? 'ok'
-                          : st === 'failed'
-                            ? 'pink'
-                            : st === 'processing' || st === 'ready'
-                              ? 'warn'
-                              : showDiscover && st === 'pending'
-                                ? 'discover'
-                                : ''
-                      }`}
-                    >
-                      {st === 'pending' ? (showDiscover ? 'OpenSERP' : 'Queued') : l._status || st}
+                    <span className={`badge ${stateBadge(st, showDiscover)}`}>
+                      {st === 'pending' ? (showDiscover ? 'Lookup' : 'Queued') : l._status || st}
                     </span>
                   </button>
                 )
               })}
             </div>
-          </div>
-
-          <div className="stat-row dash-stats">
-            <div className="stat blue">
-              <div className="label">Sent</div>
-              <div className="value">{counts.sent}</div>
-            </div>
-            <div className="stat amber">
-              <div className="label">Failed</div>
-              <div className="value">{counts.failed}</div>
-            </div>
-            <div className="stat cyan">
-              <div className="label">Left</div>
-              <div className="value">{left}</div>
-            </div>
-          </div>
+          </section>
 
           {logs.length ? (
-            <div className="panel stack">
-              <strong style={{ fontFamily: 'var(--display)' }}>Activity</strong>
-              <pre className="terminal">{logs.slice(-30).join('\n')}</pre>
-            </div>
+            <section className="card">
+              <CardHeader title="Activity" />
+              <pre className="terminal" style={{ marginTop: 12 }}>{logs.slice(-30).join('\n')}</pre>
+            </section>
           ) : null}
         </aside>
       </div>
