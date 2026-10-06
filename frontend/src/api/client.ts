@@ -146,7 +146,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (res.status === 401) {
     localStorage.removeItem('token')
     if (!window.location.pathname.startsWith('/login')) {
-      window.location.href = '/login'
+      const here = window.location.pathname + window.location.search
+      window.location.href = here && here !== '/' ? `/login?next=${encodeURIComponent(here)}` : '/login'
     }
   }
   if (!res.ok) {

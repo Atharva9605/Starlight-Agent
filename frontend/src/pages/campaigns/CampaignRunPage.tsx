@@ -12,6 +12,7 @@ import {
   SendRegular,
   SkipForwardTabRegular,
   ClockRegular,
+  ArrowDownloadRegular,
 } from '@fluentui/react-icons'
 import { api, type CampaignRunSnapshot } from '../../api/client'
 import { EmailPreviewFrame } from '../../components/EmailPreviewFrame'
@@ -43,6 +44,33 @@ function StageIcon({ state }: { state: string }) {
   return <CircleRegular className="step-item-icon" />
 }
 
+type LeadFilter = 'all' | 'sent' | 'failed' | 'other'
+
+const LEAD_FILTERS: { id: LeadFilter; label: string; match: (l: Record<string, any>) => boolean }[] = [
+  { id: 'all', label: 'All', match: () => true },
+  { id: 'sent', label: 'Sent', match: (l) => l._state === 'sent' },
+  { id: 'failed', label: 'Failed', match: (l) => l._state === 'failed' },
+  { id: 'other', label: 'Not sent', match: (l) => l._state !== 'sent' && l._state !== 'failed' },
+]
+
+function csvCell(v: unknown): string {
+  const t = String(v ?? '')
+  return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t
+}
+
+/** Results as a spreadsheet, so sales can follow up outside the app. */
+function downloadCsv(name: string, leads: Record<string, any>[]) {
+  const header = ['#', 'Company', 'Website', 'Sent to', 'Status', 'Subject', 'Error']
+  const rows = leads.map((l, i) => [i + 1, l.company || l.name || '', l.website || '', l._to || '', l._state || '', l._subject || '', l._error || ''])
+  const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n')
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${name.replace(/\.[a-z0-9]+$/i, '') || 'campaign'}-results.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 /** The whole run, after the fact: every lead, what it sent, and the activity log. */
 export function CampaignRunPage() {
   const { id = '' } = useParams()
@@ -52,6 +80,7 @@ export function CampaignRunPage() {
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [leadFilter, setLeadFilter] = useState<LeadFilter>('all')
   // Bodies are not shipped with the snapshot; they are pulled per lead.
   const [bodies, setBodies] = useState<Record<number, string>>({})
 
@@ -164,7 +193,13 @@ export function CampaignRunPage() {
           </span>
         }
         actions={
-          run.status === 'running' ? (
+          <>
+          {leads.length ? (
+            <button className="btn secondary" type="button" onClick={() => downloadCsv(runLabel(run), leads)}>
+              <ArrowDownloadRegular /> Export CSV
+            </button>
+          ) : null}
+          {run.status === 'running' ? (
             <button className="btn" type="button" onClick={() => void attachRun(id).then(() => nav('/campaigns/live'))}>
               <EyeRegular /> Watch live
             </button>
@@ -179,7 +214,8 @@ export function CampaignRunPage() {
                   ? 'Start now'
                   : `Resume ${run.counts.retriable} left`}
             </button>
-          ) : null
+          ) : null}
+          </>
         }
       />
 
@@ -275,8 +311,23 @@ export function CampaignRunPage() {
         <aside className="dash-side">
           <section className="card">
             <CardHeader title="Leads" subtitle={`${sentLeads.length} of ${leads.length} sent`} />
+            <div className="tablist compact" role="tablist" aria-label="Filter leads" style={{ marginTop: 8 }}>
+              {LEAD_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={leadFilter === f.id}
+                  className={`tab${leadFilter === f.id ? ' active' : ''}`}
+                  onClick={() => setLeadFilter(f.id)}
+                >
+                  {f.label}
+                  <span className={`tab-count${f.id === 'failed' && leads.some(f.match) ? ' danger' : ''}`}>{leads.filter(f.match).length}</span>
+                </button>
+              ))}
+            </div>
             <div className="queue" style={{ marginTop: 12 }}>
-              {leads.map((l, i) => (
+              {leads.map((l, i) => !LEAD_FILTERS.find((f) => f.id === leadFilter)!.match(l) ? null : (
                 <button
                   key={i}
                   type="button"
@@ -287,7 +338,9 @@ export function CampaignRunPage() {
                   <span className={`queue-index ${l._state}`}>{i + 1}</span>
                   <span className="queue-name">
                     <strong>{l.company || l.name || l.website || `Lead ${i + 1}`}</strong>
-                    <span>{l._to || l.website || '—'}</span>
+                    <span className={l._state === 'failed' && l._error ? 'text-danger' : undefined}>
+                      {l._state === 'failed' && l._error ? l._error : l._to || l.website || '—'}
+                    </span>
                   </span>
                   <span className={`badge ${STATE_BADGE[l._state] ?? ''}`}>{l._state}</span>
                 </button>

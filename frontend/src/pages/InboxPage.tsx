@@ -1,42 +1,31 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowSyncRegular,
   MailInboxRegular,
+  PlugDisconnectedRegular,
   SearchRegular,
   SendRegular,
   SettingsRegular,
 } from '@fluentui/react-icons'
 import { api } from '../api/client'
 import { Avatar, EmptyState, MessageBar, PageHeader, relativeTime, useToast } from '../components/ui'
+import { convBadge, convClientWaiting, convCompany, convEmail, convNeedsReview, convSnippet } from '../inbox/conversation'
 
-type Filter = 'all' | 'review' | 'done'
-
-function needsReview(c: any) {
-  return Boolean(c.has_draft || c.pending_draft)
-}
-
-function isDone(c: any) {
-  return c.status === 'closed' || c.status === 'sent'
-}
-
-function statusBadge(c: any) {
-  if (needsReview(c)) return { label: 'Needs review', cls: 'warning' }
-  if (isDone(c)) return { label: 'Done', cls: 'success' }
-  return { label: c.status || 'Open', cls: '' }
-}
+type Filter = 'review' | 'waiting' | 'all'
 
 export function InboxPage() {
   const toast = useToast()
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState('')
-  const [filter, setFilter] = useState<Filter>('all')
+  const [filter, setFilter] = useState<Filter | null>(null)
   const [search, setSearch] = useState('')
   const q = useQuery({
     queryKey: ['conversations'],
     queryFn: () => api.conversations(true),
   })
+  const gmail = useQuery({ queryKey: ['gmail-status'], queryFn: api.gmailStatus })
 
   const sync = async () => {
     setSyncing(true)
@@ -53,40 +42,63 @@ export function InboxPage() {
   }
 
   const conversations = q.data?.conversations || []
-  const reviewCount = conversations.filter(needsReview).length
-  const doneCount = conversations.filter(isDone).length
+  const reviewCount = conversations.filter(convNeedsReview).length
+  const waitingCount = conversations.filter(convClientWaiting).length
+
+  // Land on whatever needs action, once the list first arrives.
+  useEffect(() => {
+    if (filter || !q.data) return
+    setFilter(reviewCount ? 'review' : waitingCount ? 'waiting' : 'all')
+  }, [q.data, filter, reviewCount, waitingCount])
+  const active: Filter = filter || 'all'
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase()
     return conversations.filter((c: any) => {
-      if (filter === 'review' && !needsReview(c)) return false
-      if (filter === 'done' && !isDone(c)) return false
+      if (active === 'review' && !convNeedsReview(c)) return false
+      if (active === 'waiting' && !convClientWaiting(c)) return false
       if (!term) return true
-      const hay = [c.subject, c.client?.company, c.client?.email, c.client_email, c.last_message_preview, c.snippet]
+      const hay = [c.subject, convCompany(c), convEmail(c), convSnippet(c)]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
       return hay.includes(term)
     })
-  }, [conversations, filter, search])
+  }, [conversations, active, search])
 
   const tabs: { id: Filter; label: string; count: number }[] = [
+    { id: 'review', label: 'Drafts to review', count: reviewCount },
+    { id: 'waiting', label: 'Client waiting', count: waitingCount },
     { id: 'all', label: 'All', count: conversations.length },
-    { id: 'review', label: 'Needs review', count: reviewCount },
-    { id: 'done', label: 'Done', count: doneCount },
   ]
 
   return (
     <div>
       <PageHeader
         title="Inbox"
-        subtitle="Client threads with Starlight AI drafts ready for your approval."
+        subtitle="Client replies to your campaigns. Starlight drafts an answer; nothing is sent until you approve it."
         actions={
-          <button className="btn" type="button" onClick={sync} disabled={syncing}>
+          <button className="btn secondary" type="button" onClick={sync} disabled={syncing || (gmail.data?.connected === false && gmail.data?.mode !== 'platform')}>
             <ArrowSyncRegular /> {syncing ? 'Syncing…' : 'Sync Gmail'}
           </button>
         }
       />
+
+      {gmail.data && !gmail.data.connected && gmail.data.mode !== 'platform' ? (
+        <div className="page-alerts">
+          <MessageBar
+            intent="warning"
+            title="Gmail isn't connected"
+            actions={
+              <Link to="/settings" className="btn secondary sm">
+                <PlugDisconnectedRegular /> Connect Gmail
+              </Link>
+            }
+          >
+            Client replies can't sync until a mailbox is connected.
+          </MessageBar>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="page-alerts">
@@ -104,8 +116,8 @@ export function InboxPage() {
                 key={t.id}
                 type="button"
                 role="tab"
-                aria-selected={filter === t.id}
-                className={`tab${filter === t.id ? ' active' : ''}`}
+                aria-selected={active === t.id}
+                className={`tab${active === t.id ? ' active' : ''}`}
                 onClick={() => setFilter(t.id)}
               >
                 {t.label}
@@ -162,20 +174,20 @@ export function InboxPage() {
             <EmptyState
               compact
               icon={<SearchRegular />}
-              title="Nothing matches"
-              description="Try a different search or switch to another tab."
+              title={search ? 'Nothing matches' : active === 'review' ? 'No drafts waiting' : 'No clients waiting'}
+              description={search ? 'Try a different search or switch to another tab.' : "You're all caught up here. Check the All tab for older threads."}
             />
           ) : null}
 
           {visible.map((c: any) => {
-            const company = c.client?.company || c.client?.email || c.client_email || 'Client'
-            const badge = statusBadge(c)
-            const snippet = c.last_message_preview || c.snippet || ''
+            const company = convCompany(c)
+            const badge = convBadge(c)
+            const snippet = convSnippet(c)
             return (
               <Link
                 key={c.id}
                 to={`/inbox/${c.id}`}
-                className={`inbox-item${needsReview(c) ? ' unread' : ''}`}
+                className={`inbox-item${convNeedsReview(c) || convClientWaiting(c) ? ' unread' : ''}`}
               >
                 <Avatar name={String(company)} size={40} />
                 <div style={{ minWidth: 0 }}>

@@ -10,7 +10,7 @@ import {
 } from '@fluentui/react-icons'
 import { api, type OrgMember } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { Avatar, EmptyState, MessageBar, PageHeader, Spinner, useToast } from '../components/ui'
+import { Avatar, EmptyState, MessageBar, PageHeader, Spinner, relativeTime, useToast } from '../components/ui'
 
 const ROLE_OPTIONS = [
   { value: 'member', label: 'Member', blurb: 'Inbox, campaigns and catalogues' },
@@ -176,6 +176,13 @@ export function UsersPage() {
     return list.filter((m: OrgMember) => `${m.name || ''} ${m.email} ${m.role}`.toLowerCase().includes(term))
   }, [list, search])
 
+  if (!me) {
+    return (
+      <div className="center-fill" style={{ minHeight: '40vh' }}>
+        <Spinner label="Loading…" />
+      </div>
+    )
+  }
   if (!canManage) {
     return <Navigate to="/" replace />
   }
@@ -204,6 +211,10 @@ export function UsersPage() {
           <div className="row" style={{ gap: 8 }}>
             <strong>Team</strong>
             <span className="badge">{list.length} {list.length === 1 ? 'user' : 'users'}</span>
+            {(['owner', 'admin', 'member'] as const).map((r) => {
+              const n = list.filter((m: OrgMember) => m.role === r).length
+              return n ? <span key={r} className="muted text-sm hide-sm">{n} {r}{n === 1 ? '' : 's'}</span> : null
+            })}
           </div>
           <div className="input-wrap" style={{ width: 'min(280px, 100%)' }}>
             <SearchRegular />
@@ -240,6 +251,8 @@ export function UsersPage() {
                 <tr>
                   <th>Name</th>
                   <th>Role</th>
+                  <th className="hide-sm">Can do</th>
+                  <th className="hide-sm">Joined</th>
                 </tr>
               </thead>
               <tbody>
@@ -262,11 +275,17 @@ export function UsersPage() {
                         {m.role}
                       </span>
                     </td>
+                    <td className="hide-sm muted text-sm">
+                      {m.role === 'owner' || m.role === 'admin' ? 'Everything, plus users and admin tools' : 'Inbox, campaigns and catalogues'}
+                    </td>
+                    <td className="hide-sm muted text-sm" style={{ whiteSpace: 'nowrap' }}>
+                      {relativeTime(m.joined_at || m.created_at) || '—'}
+                    </td>
                   </tr>
                 ))}
                 {visible.length === 0 ? (
                   <tr>
-                    <td colSpan={2} className="muted" style={{ textAlign: 'center' }}>
+                    <td colSpan={4} className="muted" style={{ textAlign: 'center' }}>
                       No users match “{search}”
                     </td>
                   </tr>

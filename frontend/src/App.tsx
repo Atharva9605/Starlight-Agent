@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { CampaignProvider } from './campaign/CampaignContext'
@@ -29,7 +29,11 @@ const qc = new QueryClient()
 
 function Protected({ children }: { children: ReactNode }) {
   const { token } = useAuth()
-  if (!token) return <Navigate to="/login" replace />
+  const location = useLocation()
+  if (!token) {
+    const from = location.pathname + location.search
+    return <Navigate to={from && from !== '/' ? `/login?next=${encodeURIComponent(from)}` : '/login'} replace />
+  }
   return children
 }
 

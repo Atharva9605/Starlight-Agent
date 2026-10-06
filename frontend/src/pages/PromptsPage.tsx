@@ -31,6 +31,11 @@ const CATEGORY_ICONS: Record<string, ReactNode> = {
   conversation: <ChatRegular />,
 }
 
+/** `{client}`-style slots the pipeline fills in. Removing one silently breaks generation. */
+function placeholders(text: string): string[] {
+  return [...new Set(text.match(/\{[a-zA-Z_][a-zA-Z0-9_]*\}/g) || [])]
+}
+
 function categoryLabel(c: string) {
   return CATEGORY_LABELS[c] || c.replace(/_/g, ' ')
 }
@@ -86,6 +91,16 @@ export function PromptsPage() {
 
   const save = async () => {
     if (!selected || !dirty) return
+    const removed = placeholders(selected.content).filter((p) => !placeholders(draftValue).includes(p))
+    if (removed.length) {
+      const ok = await confirm({
+        title: 'Save without these placeholders?',
+        body: `${removed.join(', ')} ${removed.length === 1 ? 'is' : 'are'} filled in by the pipeline. Without ${removed.length === 1 ? 'it' : 'them'}, generated emails can lose client details or come out empty.`,
+        confirmLabel: 'Save anyway',
+        danger: true,
+      })
+      if (!ok) return
+    }
     setSaving(true)
     setError('')
     try {
@@ -132,6 +147,20 @@ export function PromptsPage() {
   })
 
   const lines = draftValue ? draftValue.split('\n').length : 0
+  const savedSlots = selected ? placeholders(selected.content) : []
+  const draftSlots = new Set(placeholders(draftValue))
+  const missingSlots = savedSlots.filter((p) => !draftSlots.has(p))
+
+  // Don't lose prompt edits to an accidental tab close.
+  useEffect(() => {
+    if (!dirtyCount) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirtyCount])
 
   return (
     <div>
@@ -231,6 +260,22 @@ export function PromptsPage() {
                     <code className="inline">opening_line</code> should greet the client from CLIENT DATA (Hey {'{client}'}, …).
                     Renaming keys empties campaign emails.
                   </span>
+                </MessageBar>
+              ) : null}
+
+              {savedSlots.length ? (
+                <div className="slot-row" aria-label="Placeholders">
+                  <span className="muted text-sm">Placeholders</span>
+                  {savedSlots.map((p) => (
+                    <code key={p} className={`slot${draftSlots.has(p) ? '' : ' missing'}`} title={draftSlots.has(p) ? 'Present' : 'Removed — put it back'}>
+                      {p}
+                    </code>
+                  ))}
+                </div>
+              ) : null}
+              {missingSlots.length ? (
+                <MessageBar intent="error" title="Placeholder removed">
+                  Put back {missingSlots.join(', ')}. The pipeline fills {missingSlots.length === 1 ? 'it' : 'them'} with client data.
                 </MessageBar>
               ) : null}
 

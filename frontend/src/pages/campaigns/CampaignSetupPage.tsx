@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   CheckmarkCircleFilled,
@@ -11,11 +12,21 @@ import {
   SendRegular,
   WandRegular,
   EyeRegular,
+  BeakerRegular,
+  PlugDisconnectedRegular,
 } from '@fluentui/react-icons'
 import { Dropzone } from '../../components/Dropzone'
 import { TEMPLATES, useCampaign } from '../../campaign/CampaignContext'
 import { api } from '../../api/client'
 import { MessageBar, PageHeader, Spinner, Switch } from '../../components/ui'
+
+type SendMode = 'review' | 'auto' | 'schedule'
+
+const SEND_MODES: { value: SendMode; label: string; blurb: string; icon: ReactNode }[] = [
+  { value: 'review', label: 'Review each email first', blurb: 'Every email is written, then you send, bulk-send or discard each one.', icon: <EyeRegular /> },
+  { value: 'auto', label: 'Send automatically now', blurb: 'Research, write and send every lead while you watch live progress.', icon: <SendRegular /> },
+  { value: 'schedule', label: 'Schedule for later', blurb: 'The server starts at the time you pick and sends automatically. You can close the browser.', icon: <CalendarClockRegular /> },
+]
 
 type TemplateOption = { value: string; label: string; blurb: string; swatch: string[] }
 
@@ -109,6 +120,17 @@ export function CampaignSetupPage() {
   const [scheduleLater, setScheduleLater] = useState(false)
   const [scheduleAt, setScheduleAt] = useState('')
   const [scheduleError, setScheduleError] = useState('')
+  const gmail = useQuery({ queryKey: ['gmail-status'], queryFn: api.gmailStatus })
+  const noMailbox = Boolean(gmail.data && !gmail.data.connected && gmail.data.mode !== 'platform')
+  const mode: SendMode = scheduleLater ? 'schedule' : autosend ? 'auto' : 'review'
+  const setMode = (m: SendMode) => {
+    if (m === 'schedule') {
+      toggleSchedule(true)
+      return
+    }
+    toggleSchedule(false)
+    setAutosend(m === 'auto')
+  }
 
   const scheduleDate = scheduleAt ? new Date(scheduleAt) : null
   const scheduleValid = Boolean(scheduleDate && !Number.isNaN(scheduleDate.getTime()) && scheduleDate.getTime() > Date.now())
@@ -215,6 +237,19 @@ export function CampaignSetupPage() {
       />
 
       <div className="page-alerts">
+        {noMailbox ? (
+          <MessageBar
+            intent="warning"
+            title="Gmail isn't connected"
+            actions={
+              <Link to="/settings" className="btn secondary sm">
+                <PlugDisconnectedRegular /> Connect Gmail
+              </Link>
+            }
+          >
+            You can upload leads and write drafts, but emails can't be sent until a mailbox is connected.
+          </MessageBar>
+        ) : null}
         {inFlight ? (
           <MessageBar
             intent="info"
@@ -252,7 +287,7 @@ export function CampaignSetupPage() {
             n={1}
             done={leads.length > 0}
             title="Lead list"
-            subtitle="Excel or CSV with company and website columns. Rows without a website are looked up automatically."
+            subtitle="Excel or CSV. We read the company, website, email and name columns."
           >
             {leads.length ? (
               <div className="file-chip">
@@ -277,6 +312,13 @@ export function CampaignSetupPage() {
                 onFiles={onFiles}
               />
             )}
+            {!leads.length ? (
+              <p className="muted text-sm">
+                Needs a <code className="inline">website</code> or a <code className="inline">company</code> column. Rows with
+                only a company name get their website looked up first. Add an <code className="inline">email</code> column to
+                choose who receives each email.
+              </p>
+            ) : null}
             {error ? <MessageBar intent="error" title="Couldn't read that file" onDismiss={() => setError('')}>{error}</MessageBar> : null}
           </Step>
 
@@ -370,56 +412,50 @@ export function CampaignSetupPage() {
             </div>
           </Step>
 
-          <Step n={3} title="Send options" subtitle="Choose how and when emails go out.">
-            <div>
-              <Switch
-                checked={autosend}
-                onChange={(v) => {
-                  setAutosend(v)
-                  if (!v) toggleSchedule(false)
-                }}
-                label="Autosend"
-                description="Skip review — research, write and send every lead automatically while you watch live progress."
-              />
-              <Switch
-                checked={scheduleLater}
-                onChange={toggleSchedule}
-                label="Schedule for later"
-                description="The server starts the campaign at the chosen time and autosends every lead. You can close the browser."
-              />
-              {scheduleLater ? (
-                <label className="field" style={{ paddingBottom: 12 }}>
-                  <span>Send at (your local time)</span>
-                  <input
-                    className="input"
-                    type="datetime-local"
-                    min={toLocalInput(new Date())}
-                    value={scheduleAt}
-                    onChange={(e) => {
-                      setScheduleAt(e.target.value)
-                      setScheduleError('')
-                    }}
-                  />
-                  {scheduleValid ? <span className="field-hint">Starts {formatScheduled(scheduleAt)}</span> : null}
-                </label>
-              ) : null}
-              <Switch
-                checked={attachProductSheet}
-                onChange={setAttachProductSheet}
-                label="Attach product sheet PDF"
-                description="A branded Starlight PDF of the catalogue products suggested in each email."
-              />
+          <Step n={3} title="Sending" subtitle="Choose how and when emails go out.">
+            <div className="stack tight" role="radiogroup" aria-label="How emails go out">
+              {SEND_MODES.map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === m.value}
+                  className={`choice-card${mode === m.value ? ' selected' : ''}`}
+                  onClick={() => setMode(m.value)}
+                >
+                  <span className="choice-card-icon">{m.icon}</span>
+                  <span className="choice-card-copy">
+                    <strong>{m.label}</strong>
+                    <span>{m.blurb}</span>
+                  </span>
+                  {mode === m.value ? <CheckmarkCircleFilled className="choice-card-check" /> : <span className="choice-card-ring" />}
+                </button>
+              ))}
             </div>
+            {scheduleLater ? (
+              <label className="field">
+                <span>Send at (your local time)</span>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  min={toLocalInput(new Date())}
+                  value={scheduleAt}
+                  onChange={(e) => {
+                    setScheduleAt(e.target.value)
+                    setScheduleError('')
+                  }}
+                />
+                {scheduleValid ? <span className="field-hint">Starts {formatScheduled(scheduleAt)}</span> : null}
+              </label>
+            ) : null}
+            <Switch
+              checked={attachProductSheet}
+              onChange={setAttachProductSheet}
+              label="Attach product sheet PDF"
+              description="A branded PDF of the catalogue products suggested in each email."
+            />
 
             {scheduleError ? <MessageBar intent="error" onDismiss={() => setScheduleError('')}>{scheduleError}</MessageBar> : null}
-
-            <MessageBar intent="info">
-              {!autosend
-                ? 'Emails are generated together, then you send, bulk-send or discard each one from the review board.'
-                : scheduleLater
-                  ? 'Scheduled campaigns appear under Campaign runs — start them early or cancel from there.'
-                  : 'Autosend opens the live view with a preview and stage timeline for each lead.'}
-            </MessageBar>
 
             <hr className="divider" />
 
@@ -432,11 +468,11 @@ export function CampaignSetupPage() {
                 value={recipientOverride}
                 onChange={(e) => setRecipientOverride(e.target.value)}
               />
-              <span className="field-hint">Optional. When set, every email goes here instead of to the lead.</span>
+              <span className="field-hint">Optional. When set, every email goes here instead of to the lead, so you can test safely.</span>
             </label>
 
             <div className="field">
-              <span className="field-label">{autosend ? 'Pause between sends' : 'Pause between bulk sends'}</span>
+              <span className="field-label">Pause between sends</span>
               <div className="slider-row">
                 <input
                   type="range"
@@ -454,12 +490,16 @@ export function CampaignSetupPage() {
       </div>
 
       {leads.length && !inFlight ? (
-        <div className="launch-bar" style={{ marginTop: 20 }}>
+        <div className={`launch-bar${recipientOverride.trim() ? ' test' : ''}`} style={{ marginTop: 20 }}>
           <div className="launch-bar-copy">
             <strong>
               {leads.length} lead{leads.length === 1 ? '' : 's'} ready
             </strong>
             <span>
+              {recipientOverride.trim() ? (
+                <span className="badge warning" style={{ marginRight: 6 }}><BeakerRegular /> Test mode · all to {recipientOverride.trim()}</span>
+              ) : null}
+              {templateOptions.find((t) => t.value === template)?.label || 'Design'} ·{' '}
               {scheduleLater
                 ? scheduleValid
                   ? `Will start ${formatScheduled(scheduleAt)}`

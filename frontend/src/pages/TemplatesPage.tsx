@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
+  CodeRegular,
+  CopyRegular,
   DeleteRegular,
+  EyeRegular,
   LockClosedRegular,
   PaintBrushRegular,
   SaveRegular,
@@ -51,6 +54,8 @@ export function TemplatesPage() {
   const [previewing, setPreviewing] = useState(false)
   const [saveName, setSaveName] = useState('')
   const [saveLabel, setSaveLabel] = useState('')
+  const [view, setView] = useState<'preview' | 'html'>('preview')
+  const [original, setOriginal] = useState('')
 
   const refreshList = useCallback(async (prefer?: string) => {
     const list = await api.templates()
@@ -74,9 +79,17 @@ export function TemplatesPage() {
       .then((t) => {
         if (cancelled) return
         setContent(t.content || '')
+        setOriginal(t.content || '')
         const meta = templates.find((x) => x.name === selected)
-        setSaveName(selected)
-        setSaveLabel(meta ? displayLabel(meta) : selected)
+        // Built-ins are read-only, so default to saving a copy under a new name.
+        if (meta && !meta.is_custom) {
+          const label = `${displayLabel(meta)} copy`
+          setSaveLabel(label)
+          setSaveName(slugify(label))
+        } else {
+          setSaveName(selected)
+          setSaveLabel(meta ? displayLabel(meta) : selected)
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e.message)
@@ -156,6 +169,8 @@ export function TemplatesPage() {
   }
 
   const current = templates.find((t) => t.name === selected)
+  const edited = content !== original
+  const isCopy = !current?.is_custom || saveName !== selected
 
   return (
     <div>
@@ -168,8 +183,9 @@ export function TemplatesPage() {
             <Link to="/admin/templates/create" className="btn secondary">
               <WandRegular /> Create with AI
             </Link>
-            <button className="btn" type="button" disabled={busy} onClick={save}>
-              {busy ? <Spinner size="sm" /> : <SaveRegular />} Save template
+            <button className="btn" type="button" disabled={busy || (!edited && !isCopy)} onClick={save}>
+              {busy ? <Spinner size="sm" /> : isCopy ? <CopyRegular /> : <SaveRegular />}
+              {isCopy ? 'Save as new template' : 'Save changes'}
             </button>
           </>
         }
@@ -178,10 +194,28 @@ export function TemplatesPage() {
       <div className="design-layout">
         <section className="card design-preview">
           <div className="design-preview-bar">
-            <strong>Customer preview</strong>
-            {previewing ? <Spinner size="sm" label="Refreshing…" /> : <span className="muted text-sm">Sample data</span>}
+            <div className="tablist compact" role="tablist" aria-label="Template view">
+              <button type="button" role="tab" aria-selected={view === 'preview'} className={`tab${view === 'preview' ? ' active' : ''}`} onClick={() => setView('preview')}>
+                <EyeRegular /> Preview
+              </button>
+              <button type="button" role="tab" aria-selected={view === 'html'} className={`tab${view === 'html' ? ' active' : ''}`} onClick={() => setView('html')}>
+                <CodeRegular /> HTML
+                {edited ? <span className="dirty-dot" title="Edited" /> : null}
+              </button>
+            </div>
+            {previewing ? <Spinner size="sm" label="Refreshing…" /> : <span className="muted text-sm">{view === 'preview' ? 'Filled with sample data' : 'Jinja HTML'}</span>}
           </div>
-          <EmailPreviewFrame html={previewHtml || content} subject="Sample Starlight email" fullscreen deviceToggle />
+          {view === 'preview' ? (
+            <EmailPreviewFrame html={previewHtml || content} subject="Sample Starlight email" fullscreen deviceToggle />
+          ) : (
+            <textarea
+              className="code-editor"
+              value={content}
+              spellCheck={false}
+              aria-label="Template HTML"
+              onChange={(e) => setContent(e.target.value)}
+            />
+          )}
         </section>
 
         <aside className="card design-side">
@@ -228,7 +262,9 @@ export function TemplatesPage() {
                 onChange={(e) => setSaveName(e.target.value)}
                 placeholder="email_template_my_design.html"
               />
-              <span className="field-hint">Use a new filename to keep a built-in design intact.</span>
+              <span className="field-hint">
+                {isCopy ? 'Saves a new template. The original stays as it is.' : 'Overwrites this template.'}
+              </span>
             </label>
 
             {error ? (
@@ -242,7 +278,7 @@ export function TemplatesPage() {
                 <DeleteRegular /> Delete template
               </button>
             ) : (
-              <MessageBar intent="info">Built-in templates are read-only — save under a new filename to keep edits.</MessageBar>
+              <MessageBar intent="info">Built-in designs can't be changed. Edit the HTML, then save it as a new template.</MessageBar>
             )}
           </div>
         </aside>

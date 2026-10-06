@@ -19,6 +19,11 @@ import { BrandMark, MessageBar, Spinner, useDocumentTitle } from '../components/
 const APP_NAME = 'Starlight AI Mailer'
 const COMPANY = 'Starlight Linear LED'
 
+/** Only same-app paths, so a crafted ?next= can't send people off-site. */
+function safeNext(value: string | null): string {
+  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/'
+}
+
 function AuthArt() {
   return (
     <div className="auth-art">
@@ -116,7 +121,7 @@ export function LoginPage() {
     }
     if (token) {
       setToken(token)
-      navigate('/inbox', { replace: true })
+      navigate(safeNext(params.get('next')), { replace: true })
     }
   }, [params, setToken, navigate])
 
@@ -127,7 +132,7 @@ export function LoginPage() {
     try {
       const res = await api.login({ email, password })
       setToken(res.token)
-      navigate('/inbox')
+      navigate(safeNext(params.get('next')), { replace: true })
     } catch (err: any) {
       setError(err.message || 'Login failed')
     } finally {
@@ -236,7 +241,7 @@ export function SignupPage() {
     try {
       const res = await api.signup({ ...form, org_name: form.org_name || COMPANY })
       setToken(res.token)
-      navigate('/inbox')
+      navigate('/', { replace: true })
     } catch (err: any) {
       setError(err.message || 'Signup failed')
     } finally {

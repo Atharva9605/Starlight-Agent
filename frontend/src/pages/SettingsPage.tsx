@@ -1,16 +1,21 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   CheckmarkCircleFilled,
   LinkRegular,
   MailRegular,
   PersonRegular,
+  PersonCircleRegular,
+  SignOutRegular,
   PlugConnectedRegular,
   PlugDisconnectedRegular,
   SaveRegular,
   WarningFilled,
 } from '@fluentui/react-icons'
 import { api } from '../api/client'
-import { CardHeader, MessageBar, PageHeader, Spinner, useConfirm, useToast } from '../components/ui'
+import { useAuth } from '../auth/AuthContext'
+import { Avatar, CardHeader, MessageBar, PageHeader, Spinner, useConfirm, useToast } from '../components/ui'
 
 const SENDER_FIELDS: { key: string; label: string; placeholder?: string; type?: string; hint?: string; span?: boolean }[] = [
   { key: 'sender_name', label: 'Name', placeholder: 'Vivek Dhondarkar' },
@@ -26,12 +31,15 @@ const SENDER_FIELDS: { key: string; label: string; placeholder?: string; type?: 
   },
 ]
 
-type Section = 'identity' | 'gmail'
+type Section = 'identity' | 'gmail' | 'account'
 
 export function SettingsPage() {
   const toast = useToast()
   const confirm = useConfirm()
-  const [section, setSection] = useState<Section>('identity')
+  const { me, logout } = useAuth()
+  const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const [section, setSection] = useState<Section>(params.get('gmail_connected') !== null ? 'gmail' : 'identity')
   const [sender, setSender] = useState<Record<string, string>>({
     sender_name: 'Vivek Dhondarkar',
     sender_company: 'Starlight Linear LED',
@@ -61,12 +69,24 @@ export function SettingsPage() {
       .catch((e) => setLoadError(e.message))
   }, [])
 
+  // Google sends people back here with ?gmail_connected=<address>.
+  useEffect(() => {
+    const connected = params.get('gmail_connected')
+    if (connected === null) return
+    toast.success('Gmail connected', connected ? `Mail now sends from ${connected}.` : undefined)
+    qc.invalidateQueries({ queryKey: ['gmail-status'] })
+    const next = new URLSearchParams(params)
+    next.delete('gmail_connected')
+    setParams(next, { replace: true })
+  }, [params, setParams, toast, qc])
+
   const saveSender = async (e: FormEvent) => {
     e.preventDefault()
     setSaving(true)
     try {
       await api.updateSender(sender)
       setDirty(false)
+      qc.invalidateQueries({ queryKey: ['sender'] })
       toast.success('Sender profile saved')
     } catch (err: any) {
       toast.error("Couldn't save the sender profile", err.message)
@@ -100,6 +120,7 @@ export function SettingsPage() {
     try {
       await api.gmailDisconnect()
       setGmail({ connected: false })
+      qc.invalidateQueries({ queryKey: ['gmail-status'] })
       toast.info('Gmail disconnected')
     } catch (e: any) {
       toast.error("Couldn't disconnect Gmail", e.message)
@@ -110,7 +131,7 @@ export function SettingsPage() {
 
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Sender identity and Gmail for this Starlight workspace." />
+      <PageHeader title="Settings" subtitle="How your emails are signed, which inbox they send from, and your account." />
 
       {loadError ? (
         <div className="page-alerts">
@@ -146,6 +167,19 @@ export function SettingsPage() {
                 <span className="vnav-title">Gmail</span>
                 <span className="vnav-sub">{gmail.connected ? connectedAs || 'Connected' : 'Not connected'}</span>
               </span>
+              {!gmail.connected && gmail.mode !== 'platform' ? <span className="dirty-dot warn" title="Not connected" /> : null}
+            </button>
+            <button
+              type="button"
+              className={`vnav-item${section === 'account' ? ' active' : ''}`}
+              aria-current={section === 'account' ? 'page' : undefined}
+              onClick={() => setSection('account')}
+            >
+              <PersonCircleRegular />
+              <span className="vnav-copy">
+                <span className="vnav-title">Your account</span>
+                <span className="vnav-sub">{me?.email || 'Sign-in details'}</span>
+              </span>
             </button>
           </div>
         </nav>
@@ -176,12 +210,26 @@ export function SettingsPage() {
                     {f.hint ? <span className="field-hint">{f.hint}</span> : null}
                   </label>
                 ))}
-                {sender.company_logo_url ? (
-                  <div className="span-2 row">
-                    <img className="logo-preview" src={sender.company_logo_url} alt="Logo preview" />
-                    <span className="muted text-sm">Logo preview</span>
+                <div className="span-2 field">
+                  <span className="field-label">Signature preview</span>
+                  <div className="signature-preview">
+                    <span className="muted">Best regards,</span>
+                    <div className="signature-row">
+                      {sender.company_logo_url ? (
+                        <img className="logo-preview" src={sender.company_logo_url} alt="" />
+                      ) : null}
+                      <div>
+                        <strong>{sender.sender_name || 'Your name'}</strong>
+                        <div>{sender.sender_company || 'Company'}</div>
+                        <div className="muted text-sm">
+                          {[sender.sender_phone, sender.sender_email, sender.sender_website].filter(Boolean).join(' · ') ||
+                            'Phone · email · website'}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                ) : null}
+                  <span className="field-hint">An approximation. The exact layout comes from the email design.</span>
+                </div>
               </div>
             </div>
             <div className="card-footer">
@@ -192,6 +240,36 @@ export function SettingsPage() {
               </button>
             </div>
           </form>
+        ) : section === 'account' ? (
+          <section className="card">
+            <CardHeader title="Your account" subtitle="The person signed in on this device." />
+            <div className="client-card" style={{ marginTop: 16 }}>
+              <Avatar name={me?.name || me?.email || '?'} size={56} />
+              <div className="grow" style={{ minWidth: 0 }}>
+                <strong style={{ fontSize: 16 }}>{me?.name || 'Starlight user'}</strong>
+                <div className="muted truncate">{me?.email}</div>
+              </div>
+            </div>
+            <dl className="facts">
+              <div>
+                <dt>Role</dt>
+                <dd><span className="badge brand" style={{ textTransform: 'capitalize' }}>{me?.role || 'member'}</span></dd>
+              </div>
+              <div>
+                <dt>Access</dt>
+                <dd>
+                  {me?.role === 'owner' || me?.role === 'admin'
+                    ? 'Everything, including users, prompts and email designs'
+                    : 'Inbox, campaigns, catalogues and settings'}
+                </dd>
+              </div>
+            </dl>
+            <div className="row" style={{ marginTop: 16 }}>
+              <button className="btn secondary" type="button" onClick={logout}>
+                <SignOutRegular /> Sign out
+              </button>
+            </div>
+          </section>
         ) : (
           <section className="card">
             <CardHeader title="Gmail" subtitle="The inbox used to sync client replies and send campaigns." />

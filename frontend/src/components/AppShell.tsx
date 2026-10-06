@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   bundleIcon,
   HomeFilled,
@@ -32,7 +33,9 @@ import {
   ChevronDownRegular,
   QuestionCircleRegular,
 } from '@fluentui/react-icons'
+import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { convNeedsReview } from '../inbox/conversation'
 import { useCampaign } from '../campaign/CampaignContext'
 import { Avatar, BrandMark } from './ui'
 
@@ -54,6 +57,7 @@ type NavItem = {
   icon: typeof Home
   end?: boolean
   keywords?: string
+  badge?: number
 }
 
 const workspaceLinks: NavItem[] = [
@@ -91,6 +95,7 @@ function NavGroup({ items, collapsed, onNavigate }: { items: NavItem[]; collapse
                 <>
                   <Icon className="nav-ico" filled={isActive} />
                   <span className="nav-label">{l.label}</span>
+                  {l.badge ? <span className="nav-badge" aria-label={`${l.badge} waiting`}>{l.badge > 99 ? '99+' : l.badge}</span> : null}
                 </>
               )}
             </NavLink>
@@ -281,6 +286,18 @@ export function AppShell() {
 
   useEffect(() => setMobileOpen(false), [location.pathname])
 
+  // Drafts waiting for approval, shown on the Inbox link. Shares the Inbox page's cache.
+  const conv = useQuery({
+    queryKey: ['conversations'],
+    queryFn: () => api.conversations(true),
+    refetchInterval: 60000,
+  })
+  const reviewCount = (conv.data?.conversations || []).filter(convNeedsReview).length
+  const navLinks = useMemo(
+    () => workspaceLinks.map((l) => (l.to === '/inbox' ? { ...l, badge: reviewCount } : l)),
+    [reviewCount],
+  )
+
   const toggleNav = () => {
     if (window.matchMedia('(max-width: 960px)').matches) {
       setMobileOpen((v) => !v)
@@ -339,7 +356,7 @@ export function AppShell() {
       <div className="shell-body">
         <aside className="sidebar" aria-label="Main navigation">
           <nav className="sidebar-scroll">
-            <NavGroup items={workspaceLinks} collapsed={collapsed} onNavigate={closeMobile} />
+            <NavGroup items={navLinks} collapsed={collapsed} onNavigate={closeMobile} />
             {isAdmin ? (
               <div className="nav-group">
                 <button

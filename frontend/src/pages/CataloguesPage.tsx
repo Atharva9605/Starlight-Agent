@@ -5,7 +5,7 @@ import {
   BookOpenRegular,
   CheckmarkCircleFilled,
   CopyRegular,
-  DatabaseRegular,
+  BoxRegular,
   DeleteRegular,
   DocumentPdfRegular,
   DocumentSearchRegular,
@@ -15,6 +15,7 @@ import {
   ArrowUploadRegular,
 } from '@fluentui/react-icons'
 import { api, type CatalogueFileResult } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { Dropzone } from '../components/Dropzone'
 import { CardHeader, EmptyState, MessageBar, PageHeader, useConfirm, useToast } from '../components/ui'
 
@@ -24,6 +25,8 @@ const POLL_MS = 2000
 export function CataloguesPage() {
   const toast = useToast()
   const confirm = useConfirm()
+  const { me } = useAuth()
+  const isAdmin = me?.role === 'owner' || me?.role === 'admin'
   const kb = useQuery({ queryKey: ['kb'], queryFn: api.kbStatus })
   const library = useQuery({ queryKey: ['library-catalogues'], queryFn: api.listCatalogues })
   const [msg, setMsg] = useState('')
@@ -73,6 +76,7 @@ export function CataloguesPage() {
   const catalogues = library.data?.catalogues || []
   const legacyNames = kb.data?.catalogues || []
   const hasAny = catalogues.length > 0 || legacyNames.length > 0
+  const productCount = catalogues.reduce((n, c) => n + (c.product_count || 0), 0)
 
   const copyShare = async (url: string) => {
     try {
@@ -108,16 +112,18 @@ export function CataloguesPage() {
     <div>
       <PageHeader
         title="Catalogues"
-        subtitle="Upload Starlight product PDFs that ground every outbound email — and power your digital catalogue."
+        subtitle="Your product PDFs. Emails only recommend products found here, and each catalogue gets a shareable online version."
         actions={
-          <>
-            <Link to="/admin/rag" className="btn secondary">
-              <DocumentSearchRegular /> RAG lab
-            </Link>
-            <button className="btn danger-outline" type="button" disabled={busy || !hasAny} onClick={clearAll}>
-              <DeleteRegular /> Clear all
-            </button>
-          </>
+          isAdmin ? (
+            <>
+              <Link to="/admin/rag" className="btn secondary">
+                <DocumentSearchRegular /> Test search
+              </Link>
+              <button className="btn danger-outline" type="button" disabled={busy || !hasAny} onClick={clearAll}>
+                <DeleteRegular /> Clear all
+              </button>
+            </>
+          ) : null
         }
       />
 
@@ -130,10 +136,10 @@ export function CataloguesPage() {
           </div>
         </div>
         <div className="kpi">
-          <span className="kpi-icon teal"><DatabaseRegular /></span>
+          <span className="kpi-icon teal"><BoxRegular /></span>
           <div className="kpi-copy">
-            <div className="kpi-label">Indexed chunks</div>
-            <div className="kpi-value">{kb.data?.chunk_count ?? '—'}</div>
+            <div className="kpi-label">Products</div>
+            <div className="kpi-value">{library.isLoading ? '—' : productCount}</div>
           </div>
         </div>
         <div className="kpi">
@@ -147,12 +153,74 @@ export function CataloguesPage() {
         </div>
       </div>
 
-      <div className="setup-grid">
+      <div className="catalogue-grid">
+        <section className="card">
+          <CardHeader
+            icon={<BookOpenRegular />}
+            title="Digital library"
+            subtitle="Copy a share link to send clients a searchable online version of the catalogue."
+          />
+          <div className={catalogues.length ? 'lib-grid' : 'list'} style={{ marginTop: 12 }}>
+            {!hasAny && !fileResults.length ? (
+              <EmptyState
+                compact
+                icon={<LibraryRegular />}
+                title="No catalogues yet"
+                description="Upload a product PDF to start grounding emails and build your digital library."
+              />
+            ) : catalogues.length ? (
+              catalogues.map((c) => (
+                <article key={c.id} className="lib-card">
+                  <div className={`lib-cover${c.cover_image_url ? '' : ' empty'}`}>
+                    {c.cover_image_url ? <img src={c.cover_image_url} alt="" loading="lazy" /> : <DocumentPdfRegular />}
+                  </div>
+                  <div className="lib-body">
+                    <strong className="lib-title" title={c.name}>{c.name}</strong>
+                    <span className="muted text-sm">
+                      {c.product_count ?? 0} products
+                      {c.page_count ? ` · ${c.page_count} pages` : ''}
+                    </span>
+                  </div>
+                  {c.share_url ? (
+                    <div className="lib-actions">
+                      <button type="button" className="btn secondary sm" onClick={() => copyShare(c.share_url!)}>
+                        <CopyRegular /> Copy link
+                      </button>
+                      <a
+                        className="btn subtle icon-only sm"
+                        href={c.share_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open online catalogue"
+                        aria-label={`Open ${c.name}`}
+                      >
+                        <OpenRegular />
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="lib-actions"><span className="badge success">Indexed</span></div>
+                  )}
+                </article>
+              ))
+            ) : (
+              legacyNames.map((name: string) => (
+                <div key={name} className="list-item">
+                  <span className="cell-icon pdf"><DocumentPdfRegular /></span>
+                  <div className="list-item-copy">
+                    <span className="list-item-title">{name}</span>
+                    <span className="list-item-sub">Re-upload to add it to the digital library.</span>
+                  </div>
+                  <span className="badge success">Indexed</span>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
         <section className="card">
           <CardHeader
             icon={<ArrowUploadRegular />}
-            title="Upload catalogues"
-            subtitle="PDF, TXT or DOCX. Scanned PDFs are read with OCR and can take a few minutes."
+            title="Add a catalogue"
+            subtitle="PDF, TXT or DOCX. Scanned PDFs are read with OCR and can take a few minutes. You can leave this page while it runs."
           />
           <div className="stack" style={{ marginTop: 16 }}>
             <Dropzone
@@ -201,72 +269,6 @@ export function CataloguesPage() {
           </div>
         </section>
 
-        <section className="card">
-          <CardHeader
-            icon={<BookOpenRegular />}
-            title="Digital library"
-            subtitle="Share links open a public, searchable version of each catalogue."
-          />
-          <div className="list" style={{ marginTop: 12 }}>
-            {!hasAny && !fileResults.length ? (
-              <EmptyState
-                compact
-                icon={<LibraryRegular />}
-                title="No catalogues yet"
-                description="Upload a product PDF to start grounding emails and build your digital library."
-              />
-            ) : catalogues.length ? (
-              catalogues.map((c) => (
-                <div key={c.id} className="list-item">
-                  <span className="cell-icon pdf"><DocumentPdfRegular /></span>
-                  <div className="list-item-copy">
-                    <span className="list-item-title">{c.name}</span>
-                    <span className="list-item-sub">
-                      {c.product_count ?? 0} products
-                      {c.page_count ? ` · ${c.page_count} pages` : ''}
-                    </span>
-                  </div>
-                  {c.share_url ? (
-                    <div className="row nowrap" style={{ gap: 4 }}>
-                      <button
-                        type="button"
-                        className="btn subtle icon-only"
-                        title="Copy share link"
-                        aria-label={`Copy share link for ${c.name}`}
-                        onClick={() => copyShare(c.share_url!)}
-                      >
-                        <CopyRegular />
-                      </button>
-                      <a
-                        className="btn subtle icon-only"
-                        href={c.share_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open digital catalogue"
-                        aria-label={`Open ${c.name}`}
-                      >
-                        <OpenRegular />
-                      </a>
-                    </div>
-                  ) : (
-                    <span className="badge success">Indexed</span>
-                  )}
-                </div>
-              ))
-            ) : (
-              legacyNames.map((name: string) => (
-                <div key={name} className="list-item">
-                  <span className="cell-icon pdf"><DocumentPdfRegular /></span>
-                  <div className="list-item-copy">
-                    <span className="list-item-title">{name}</span>
-                    <span className="list-item-sub">Re-upload to add it to the digital library.</span>
-                  </div>
-                  <span className="badge success">Indexed</span>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
       </div>
     </div>
   )

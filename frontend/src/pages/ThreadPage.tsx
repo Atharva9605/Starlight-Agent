@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import {
+  ArrowRightRegular,
+  AttachRegular,
   ChatMultipleRegular,
+  GlobeRegular,
   CheckmarkRegular,
   DeleteRegular,
   MailRegular,
@@ -13,7 +16,9 @@ import { api } from '../api/client'
 import { EmailComposer } from '../components/EmailComposer'
 import { EmailPreviewFrame } from '../components/EmailPreviewFrame'
 import { MessageBubble } from '../components/MessageBubble'
+import { convCompany, convNeedsReview } from '../inbox/conversation'
 import {
+  Avatar,
   CardHeader,
   EmptyState,
   MessageBar,
@@ -35,13 +40,14 @@ export function ThreadPage() {
   const [bodyHtml, setBodyHtml] = useState('')
   const [bodyText, setBodyText] = useState('')
   const [composerKey, setComposerKey] = useState(0)
-  const [pane, setPane] = useState<Pane>('draft')
+  const [pane, setPane] = useState<Pane | null>(null)
 
   const q = useQuery({
     queryKey: ['conversation', id],
     queryFn: () => api.conversation(id),
     enabled: !!id,
   })
+  const list = useQuery({ queryKey: ['conversations'], queryFn: () => api.conversations(true) })
 
   const draft = useMemo(() => {
     const messages = q.data?.messages || []
@@ -52,6 +58,15 @@ export function ThreadPage() {
     const messages = q.data?.messages || []
     return messages.filter((m: any) => m.status !== 'draft')
   }, [q.data])
+
+  // Open on the draft when one is waiting, otherwise on what the client said.
+  useEffect(() => {
+    setPane(null)
+  }, [id])
+  useEffect(() => {
+    if (pane || !q.data) return
+    setPane(draft ? 'draft' : 'thread')
+  }, [q.data, draft, pane])
 
   useEffect(() => {
     if (!draft) {
@@ -142,14 +157,26 @@ export function ThreadPage() {
   const busy = generate.isPending || save.isPending || approve.isPending || reject.isPending
   const clientLabel = q.data?.client?.company || q.data?.client?.email || 'Client'
   const hasDraftBody = Boolean(draft && (bodyHtml || bodyText))
+  const activePane: Pane = pane || 'thread'
+  const client = q.data?.client || {}
+  const website = String(client.website || '').trim()
+  const inboundCount = timeline.filter((m: any) => m.direction === 'inbound').length
+  const attachments: any[] = q.data?.attachments || []
+  const nextToReview = (list.data?.conversations || []).find((c: any) => c.id !== id && convNeedsReview(c))
 
   return (
     <div>
       <PageHeader
         breadcrumb={[{ label: 'Inbox', to: '/inbox' }, { label: q.data?.subject || 'Conversation' }]}
         title={q.data?.subject || 'Conversation'}
-        subtitle={clientLabel}
-        actions={<span className="badge warning lg">Human approval required</span>}
+        subtitle={client.email && client.email !== clientLabel ? `${clientLabel} · ${client.email}` : clientLabel}
+        actions={
+          nextToReview ? (
+            <Link to={`/inbox/${nextToReview.id}`} className="btn secondary" title={nextToReview.subject || ''}>
+              Next draft: {convCompany(nextToReview)} <ArrowRightRegular />
+            </Link>
+          ) : null
+        }
       />
 
       {q.isError ? (
@@ -166,21 +193,22 @@ export function ThreadPage() {
             <button
               type="button"
               role="tab"
-              aria-selected={pane === 'draft'}
-              className={`tab${pane === 'draft' ? ' active' : ''}`}
-              onClick={() => setPane('draft')}
-            >
-              <MailRegular /> Draft preview
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={pane === 'thread'}
-              className={`tab${pane === 'thread' ? ' active' : ''}`}
+              aria-selected={activePane === 'thread'}
+              className={`tab${activePane === 'thread' ? ' active' : ''}`}
               onClick={() => setPane('thread')}
             >
               <ChatMultipleRegular /> Conversation
               <span className="tab-count">{timeline.length}</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activePane === 'draft'}
+              className={`tab${activePane === 'draft' ? ' active' : ''}`}
+              onClick={() => setPane('draft')}
+            >
+              <MailRegular /> Draft reply
+              {draft ? <span className="badge warning">To review</span> : null}
             </button>
           </div>
 
@@ -189,7 +217,7 @@ export function ThreadPage() {
               <div className="center-fill">
                 <Spinner label="Loading conversation…" />
               </div>
-            ) : pane === 'draft' ? (
+            ) : activePane === 'draft' ? (
               hasDraftBody ? (
                 <EmailPreviewFrame
                   html={bodyHtml}
@@ -235,7 +263,45 @@ export function ThreadPage() {
           </div>
         </section>
 
-        <aside className="card thread-side">
+        <aside className="thread-side stack loose">
+          <section className="card">
+            <div className="client-card">
+              <Avatar name={clientLabel} size={44} />
+              <div className="grow" style={{ minWidth: 0 }}>
+                <strong className="truncate" style={{ display: 'block' }}>{clientLabel}</strong>
+                {client.email ? <span className="muted text-sm truncate" style={{ display: 'block' }}>{client.email}</span> : null}
+              </div>
+            </div>
+            <dl className="facts">
+              {website ? (
+                <div>
+                  <dt><GlobeRegular /> Website</dt>
+                  <dd>
+                    <a className="link" href={/^https?:/i.test(website) ? website : `https://${website}`} target="_blank" rel="noreferrer">
+                      {website.replace(/^https?:\/\//, '')}
+                    </a>
+                  </dd>
+                </div>
+              ) : null}
+              <div>
+                <dt><ChatMultipleRegular /> Messages</dt>
+                <dd>{timeline.length} · {inboundCount} from client</dd>
+              </div>
+              {attachments.length ? (
+                <div>
+                  <dt><AttachRegular /> Attachments</dt>
+                  <dd>{attachments.length}</dd>
+                </div>
+              ) : null}
+            </dl>
+            {q.data?.conversation_summary ? (
+              <div className="hyde-box" style={{ marginTop: 12 }}>
+                <span className="ai-label"><SparkleRegular /> Summary</span>
+                <p>{q.data.conversation_summary}</p>
+              </div>
+            ) : null}
+          </section>
+          <section className="card">
           <CardHeader
             icon={<SparkleRegular />}
             title="AI draft"
@@ -303,9 +369,12 @@ export function ThreadPage() {
                 </div>
               </>
             ) : (
-              <p className="muted text-sm">No draft yet — generate one after a client reply.</p>
+              <p className="muted text-sm">
+                {inboundCount ? 'No draft yet. Generate one, check it, then approve.' : 'No draft yet. The client hasn’t replied in this thread.'}
+              </p>
             )}
           </div>
+          </section>
         </aside>
       </div>
     </div>

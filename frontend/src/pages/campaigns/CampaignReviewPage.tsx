@@ -119,6 +119,9 @@ export function CampaignReviewPage() {
   const [input, setInput] = useState('')
   const [bulkInput, setBulkInput] = useState('')
   const [tab, setTab] = useState<ListTab>('review')
+  const [bulkOpen, setBulkOpen] = useState(false)
+  // After a send or discard, move on to the next email that is ready to review.
+  const [advanceFrom, setAdvanceFrom] = useState<number | null>(null)
   const chatEnd = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -131,6 +134,21 @@ export function CampaignReviewPage() {
     const next = firstPreviewIndex(leads, currentIndex)
     if (next >= 0 && next !== currentIndex) selectLead(next)
   }, [leads, currentIndex, selectLead])
+
+  useEffect(() => {
+    if (advanceFrom === null) return
+    const st = leads[advanceFrom] ? leadState(leads[advanceFrom]) : 'pending'
+    if (st === 'failed') {
+      setAdvanceFrom(null)
+      return
+    }
+    if (st !== 'sent' && st !== 'skipped') return
+    setAdvanceFrom(null)
+    if (currentIndex !== advanceFrom) return
+    const order = [...leads.keys()].map((k) => (advanceFrom + 1 + k) % leads.length)
+    const next = order.find((i) => leadState(leads[i]) === 'ready')
+    if (next !== undefined) selectLead(next)
+  }, [leads, advanceFrom, currentIndex, selectLead])
 
   if (!leads.length) return <Navigate to="/campaigns" replace />
   if (status === 'running') return <Navigate to="/campaigns/live" replace />
@@ -287,8 +305,19 @@ export function CampaignReviewPage() {
         <CardHeader
           icon={<SparkleRegular />}
           title="Edit every email with AI"
-          subtitle="Applies to every email already written, and to every one generated after this."
+          subtitle={
+            bulkEdits.length
+              ? `${bulkEdits.length} edit${bulkEdits.length === 1 ? '' : 's'} applied to every email`
+              : 'One instruction, applied to every email already written and every one still to come.'
+          }
+          actions={
+            <button type="button" className="btn subtle sm" aria-expanded={bulkOpen || bulkRevising} onClick={() => setBulkOpen((v) => !v)}>
+              {bulkOpen || bulkRevising ? 'Hide' : bulkEdits.length ? 'Show' : 'Add an edit'}
+            </button>
+          }
         />
+        {bulkOpen || bulkRevising ? (
+        <>
         {bulkEdits.length ? (
           <div className="row" style={{ gap: 6 }}>
             {bulkEdits.map((msg, i) => (
@@ -318,6 +347,8 @@ export function CampaignReviewPage() {
             {bulkRevising ? `Updating ${bulkReviseProgress.done}/${bulkReviseProgress.total}` : 'Apply to all'}
           </button>
         </div>
+        </>
+        ) : null}
       </form>
 
       <div className="board">
@@ -529,7 +560,10 @@ export function CampaignReviewPage() {
                   className="btn danger-outline"
                   type="button"
                   disabled={!canAct || acting}
-                  onClick={() => void discardLead(currentIndex)}
+                  onClick={() => {
+                    setAdvanceFrom(currentIndex)
+                    void discardLead(currentIndex)
+                  }}
                 >
                   <DeleteRegular /> Discard
                 </button>
@@ -542,7 +576,10 @@ export function CampaignReviewPage() {
                   {focusState === 'queued' ? <TaskListSquareLtrRegular /> : <TaskListAddRegular />}
                   {focusState === 'queued' ? 'Remove from bulk' : 'Add to bulk'}
                 </button>
-                <button className="btn" type="button" disabled={!canAct || acting} onClick={() => void sendLead(currentIndex)}>
+                <button className="btn" type="button" disabled={!canAct || acting} onClick={() => {
+                  setAdvanceFrom(currentIndex)
+                  void sendLead(currentIndex)
+                }}>
                   {sendingThis ? <Spinner size="sm" /> : <SendRegular />}
                   {sendingThis ? 'Sending…' : 'Send now'}
                 </button>

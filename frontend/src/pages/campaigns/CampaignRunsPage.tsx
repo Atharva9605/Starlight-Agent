@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AddRegular,
@@ -8,6 +8,7 @@ import {
   OpenRegular,
   PlayRegular,
   ArrowEnterRegular,
+  SearchRegular,
 } from '@fluentui/react-icons'
 import { api, type CampaignRun } from '../../api/client'
 import { useCampaign } from '../../campaign/CampaignContext'
@@ -38,6 +39,15 @@ export function formatWhen(value: string | null | undefined): string {
   })
 }
 
+type RunFilter = 'all' | 'active' | 'scheduled' | 'finished'
+
+const FILTERS: { id: RunFilter; label: string; match: (r: CampaignRun) => boolean }[] = [
+  { id: 'all', label: 'All', match: () => true },
+  { id: 'active', label: 'Sending', match: (r) => r.status === 'running' || r.status === 'paused' },
+  { id: 'scheduled', label: 'Scheduled', match: (r) => r.status === 'scheduled' },
+  { id: 'finished', label: 'Finished', match: (r) => r.status === 'done' || r.status === 'stopped' || r.status === 'failed' },
+]
+
 /** Every campaign this org has run — live ones to rejoin, finished ones to read. */
 export function CampaignRunsPage() {
   const nav = useNavigate()
@@ -48,6 +58,16 @@ export function CampaignRunsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState('')
+  const [filter, setFilter] = useState<RunFilter>('all')
+  const [search, setSearch] = useState('')
+
+  const visible = useMemo(() => {
+    const f = FILTERS.find((x) => x.id === filter)!
+    const term = search.trim().toLowerCase()
+    return runs.filter(
+      (r) => f.match(r) && (!term || `${r.file_name} ${r.sender_email} ${r.created_by_email}`.toLowerCase().includes(term)),
+    )
+  }, [runs, filter, search])
 
   const load = useCallback(async () => {
     try {
@@ -169,6 +189,38 @@ export function CampaignRunsPage() {
             }
           />
         ) : (
+          <>
+          <div className="inbox-toolbar">
+            <div className="tablist" role="tablist" aria-label="Filter runs">
+              {FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === f.id}
+                  className={`tab${filter === f.id ? ' active' : ''}`}
+                  onClick={() => setFilter(f.id)}
+                >
+                  {f.label}
+                  <span className="tab-count">{runs.filter(f.match).length}</span>
+                </button>
+              ))}
+            </div>
+            <div className="input-wrap inbox-search">
+              <SearchRegular />
+              <input
+                className="input"
+                type="search"
+                placeholder="Search by file or sender"
+                aria-label="Search runs"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+          {visible.length === 0 ? (
+            <EmptyState compact icon={<SearchRegular />} title="No runs match" description="Try another tab or search." />
+          ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
@@ -181,7 +233,7 @@ export function CampaignRunsPage() {
                 </tr>
               </thead>
               <tbody>
-                {runs.map((run) => {
+                {visible.map((run) => {
                   const live = run.status === 'running' || run.status === 'paused'
                   const scheduled = run.status === 'scheduled'
                   const badge = STATUS_BADGE[run.status] || { label: run.status, cls: '' }
@@ -201,6 +253,7 @@ export function CampaignRunsPage() {
                           <span className="cell-sub">
                             {run.total} lead{run.total === 1 ? '' : 's'}
                             {run.sender_email ? ` · from ${run.sender_email}` : ''}
+                            {run.options?.recipient_override ? ' · test run' : ''}
                           </span>
                         </div>
                       </td>
@@ -269,6 +322,8 @@ export function CampaignRunsPage() {
               </tbody>
             </table>
           </div>
+          )}
+          </>
         )}
       </section>
     </div>
