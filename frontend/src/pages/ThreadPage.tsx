@@ -9,11 +9,9 @@ import {
   CheckmarkRegular,
   DeleteRegular,
   MailRegular,
-  SaveRegular,
   SparkleRegular,
 } from '@fluentui/react-icons'
 import { api } from '../api/client'
-import { EmailComposer } from '../components/EmailComposer'
 import { EmailPreviewFrame } from '../components/EmailPreviewFrame'
 import { MessageBubble } from '../components/MessageBubble'
 import { convCompany, convNeedsReview } from '../inbox/conversation'
@@ -36,10 +34,6 @@ export function ThreadPage() {
   const toast = useToast()
   const confirm = useConfirm()
   const [instructions, setInstructions] = useState('')
-  const [subject, setSubject] = useState('')
-  const [bodyHtml, setBodyHtml] = useState('')
-  const [bodyText, setBodyText] = useState('')
-  const [composerKey, setComposerKey] = useState(0)
   const [pane, setPane] = useState<Pane | null>(null)
 
   const q = useQuery({
@@ -68,54 +62,23 @@ export function ThreadPage() {
     setPane(draft ? 'draft' : 'thread')
   }, [q.data, draft, pane])
 
-  useEffect(() => {
-    if (!draft) {
-      setSubject('')
-      setBodyHtml('')
-      setBodyText('')
-      return
-    }
-    setSubject(draft.subject || '')
-    setBodyHtml(draft.body_html || '')
-    setBodyText(draft.body_text || '')
-    setComposerKey((k) => k + 1)
-  }, [draft?.id])
+  const subject: string = draft?.subject || ''
+  const bodyHtml: string = draft?.body_html || ''
+  const bodyText: string = draft?.body_text || ''
 
   const generate = useMutation({
     mutationFn: () => api.generateDraft(id, instructions),
     onSuccess: async () => {
       toast.success('Draft ready', 'Review the preview, then approve.')
+      setInstructions('')
       setPane('draft')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
     onError: (e: any) => toast.error("Couldn't write a draft", e.message),
   })
 
-  const save = useMutation({
-    mutationFn: () =>
-      api.updateDraft(id, draft.id, {
-        subject,
-        body_html: bodyHtml,
-        body_text: bodyText,
-      }),
-    onSuccess: async () => {
-      toast.success('Draft saved')
-      await qc.invalidateQueries({ queryKey: ['conversation', id] })
-    },
-    onError: (e: any) => toast.error("Couldn't save the draft", e.message),
-  })
-
   const approve = useMutation({
-    mutationFn: async () => {
-      if (draft) {
-        await api.updateDraft(id, draft.id, {
-          subject,
-          body_html: bodyHtml,
-          body_text: bodyText,
-        })
-      }
-      return api.approveDraft(id, draft.id)
-    },
+    mutationFn: () => api.approveDraft(id, draft.id),
     onSuccess: async () => {
       toast.success('Reply sent', 'The approved draft is on its way to the client.')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
@@ -127,9 +90,6 @@ export function ThreadPage() {
     mutationFn: () => api.rejectDraft(id, draft.id),
     onSuccess: async () => {
       toast.info('Draft discarded')
-      setSubject('')
-      setBodyHtml('')
-      setBodyText('')
       await qc.invalidateQueries({ queryKey: ['conversation', id] })
     },
     onError: (e: any) => toast.error("Couldn't discard the draft", e.message),
@@ -154,7 +114,7 @@ export function ThreadPage() {
     if (ok) reject.mutate()
   }
 
-  const busy = generate.isPending || save.isPending || approve.isPending || reject.isPending
+  const busy = generate.isPending || approve.isPending || reject.isPending
   const clientLabel = q.data?.client?.company || q.data?.client?.email || 'Client'
   const hasDraftBody = Boolean(draft && (bodyHtml || bodyText))
   const activePane: Pane = pane || 'thread'
@@ -305,7 +265,7 @@ export function ThreadPage() {
           <CardHeader
             icon={<SparkleRegular />}
             title="AI draft"
-            subtitle="Edit it like an email — the preview is exactly what the client receives."
+            subtitle="Tell the AI what to change — the preview is exactly what the client receives."
           />
 
           <div className="stack" style={{ marginTop: 16 }}>
@@ -334,38 +294,13 @@ export function ThreadPage() {
             {draft ? (
               <>
                 <hr className="divider" />
-                {draft.internal_note ? (
-                  <MessageBar intent="warning" title="Sales note">
-                    {draft.internal_note}
-                  </MessageBar>
-                ) : null}
-                <label className="field">
-                  <span>Subject</span>
-                  <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} />
-                </label>
-                <div className="field">
-                  <span className="field-label">Body</span>
-                  <EmailComposer
-                    key={composerKey}
-                    html={bodyHtml}
-                    onChange={(h, t) => {
-                      setBodyHtml(h)
-                      setBodyText(t)
-                    }}
-                  />
-                </div>
                 <div className="row between">
                   <button className="btn danger-outline" type="button" onClick={onReject} disabled={busy}>
                     <DeleteRegular /> Discard
                   </button>
-                  <div className="row">
-                    <button className="btn secondary" type="button" onClick={() => save.mutate()} disabled={busy}>
-                      <SaveRegular /> Save
-                    </button>
-                    <button className="btn" type="button" onClick={onApprove} disabled={busy}>
-                      <CheckmarkRegular /> Approve & send
-                    </button>
-                  </div>
+                  <button className="btn" type="button" onClick={onApprove} disabled={busy}>
+                    <CheckmarkRegular /> Approve & send
+                  </button>
                 </div>
               </>
             ) : (
