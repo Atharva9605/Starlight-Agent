@@ -1166,48 +1166,83 @@ code.inline { font-size: 12px; padding: 1px 6px; border-radius: var(--radius-md)
 /* =====================================================================
    Auth
    ===================================================================== */
-.auth-screen { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 560px); background: var(--bg-1); }
+/* Sign-in / sign-up use the Starlight logo palette: electric lime on white. */
+.auth-screen {
+  --sl-green: #00E600;
+  --sl-leaf: #7CDE00;
+  --sl-ink: #0B2A0B;      /* dark green-black for text on green */
+  --sl-deep: #0B7A0B;     /* readable green for links/text on white */
+  --sl-tint: #F2FDE8;
+  --brand-80: var(--sl-deep);
+  --brand-90: #096609;
+  --brand-60: #075207;
+  min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 560px); background: #fff;
+}
 .auth-art {
   position: relative; overflow: hidden;
   display: flex; align-items: center;
   padding: 48px 56px;
-  color: #fff;
-  background: var(--brand-80);
+  color: var(--sl-ink);
+  background: linear-gradient(160deg, #FFFFFF 0%, var(--sl-tint) 55%, #E3FBCC 100%);
+  border-right: 1px solid #E4F5D6;
 }
 .auth-art::before {
   content: ''; position: absolute; inset: 0;
   background:
-    radial-gradient(circle at 85% 15%, rgba(255, 255, 255, 0.14), transparent 40%),
-    radial-gradient(circle at 10% 90%, rgba(6, 23, 36, 0.35), transparent 45%);
+    radial-gradient(circle at 88% 12%, rgba(0, 230, 0, 0.22), transparent 38%),
+    radial-gradient(circle at 8% 92%, rgba(124, 222, 0, 0.28), transparent 42%);
 }
 .auth-art::after {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 18%;
-  height: 3px; background: linear-gradient(90deg, transparent, rgba(156, 203, 245, 0.9), transparent);
-  box-shadow: 0 0 24px 6px rgba(156, 203, 245, 0.35);
+  content: ''; position: absolute; left: 0; right: 0; bottom: 14%;
+  height: 4px; border-radius: 4px;
+  background: linear-gradient(90deg, transparent, var(--sl-leaf) 25%, var(--sl-green) 50%, var(--sl-leaf) 75%, transparent);
+  box-shadow: 0 0 28px 8px rgba(0, 230, 0, 0.35);
 }
 .auth-art-inner { position: relative; z-index: 1; max-width: 520px; display: flex; flex-direction: column; gap: 20px; }
 .auth-art-brand { display: flex; align-items: center; gap: 12px; }
-.auth-art-brand .brand-mark rect:first-child { fill: #fff; }
-.auth-art-brand .brand-mark path { fill: var(--brand-80); }
-.auth-art-brand .brand-mark rect:last-child { fill: var(--brand-100); }
-.auth-product-name { font-size: 18px; font-weight: 600; }
-.auth-company { font-size: 13px; color: rgba(255, 255, 255, 0.78); }
-.auth-art h1 { font-family: var(--font-display); font-size: 40px; line-height: 52px; font-weight: 600; letter-spacing: -0.02em; }
-.auth-purpose { font-size: 16px; line-height: 24px; color: rgba(255, 255, 255, 0.9); max-width: 46ch; }
+.auth-screen .brand-mark rect:first-child { fill: var(--sl-green); }
+.auth-screen .brand-mark path { fill: #fff; }
+.auth-screen .brand-mark rect:last-child { fill: var(--sl-ink); }
+.auth-art-brand .brand-mark { filter: drop-shadow(0 4px 12px rgba(0, 230, 0, 0.45)); }
+.auth-product-name { font-size: 18px; font-weight: 700; }
+.auth-company { font-size: 13px; color: var(--sl-deep); font-weight: 600; letter-spacing: 0.02em; }
+.auth-art h1 { font-family: var(--font-display); font-size: 40px; line-height: 52px; font-weight: 700; letter-spacing: -0.02em; }
+.auth-art h1 .auth-hl {
+  background: linear-gradient(transparent 62%, rgba(0, 230, 0, 0.45) 62%, rgba(124, 222, 0, 0.45) 92%, transparent 92%);
+  padding: 0 2px;
+}
+.auth-purpose { font-size: 16px; line-height: 24px; color: #2F4A2F; max-width: 46ch; }
 .auth-features { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.auth-features li { display: flex; gap: 12px; align-items: flex-start; font-size: 15px; line-height: 22px; }
-.auth-features svg { font-size: 22px; flex: none; color: var(--brand-150); margin-top: 0; }
-.auth-form-wrap { display: grid; place-items: center; padding: 40px 32px; background: var(--bg-1); }
+.auth-features li { display: flex; gap: 12px; align-items: center; font-size: 15px; line-height: 22px; color: var(--sl-ink); }
+.auth-features svg {
+  font-size: 18px; flex: none; box-sizing: content-box; padding: 7px;
+  border-radius: var(--radius-circle);
+  color: var(--sl-ink); background: linear-gradient(135deg, var(--sl-green), var(--sl-leaf));
+  box-shadow: 0 2px 10px rgba(0, 230, 0, 0.35);
+}
+.auth-form-wrap { display: grid; place-items: center; padding: 40px 32px; background: #fff; }
 .auth-card { width: min(380px, 100%); display: flex; flex-direction: column; gap: 16px; animation: slideUp 250ms var(--curve-decel); }
 .auth-card-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .auth-card-brand span { font-size: 15px; font-weight: 600; color: var(--fg-2); }
-.auth-card h2 { font-family: var(--font-display); font-size: 24px; line-height: 32px; font-weight: 600; }
+.auth-card h2 { font-family: var(--font-display); font-size: 24px; line-height: 32px; font-weight: 700; color: var(--sl-ink); }
 .auth-card .auth-sub { color: var(--fg-3); margin-top: -10px; }
+.auth-card .btn:not(.google):not(.subtle) {
+  background: var(--sl-green); color: var(--sl-ink); border-color: var(--sl-green);
+  box-shadow: 0 4px 14px rgba(0, 230, 0, 0.3);
+}
+.auth-card .btn:not(.google):not(.subtle):hover { background: var(--sl-leaf); border-color: var(--sl-leaf); }
+.auth-card .btn:not(.google):not(.subtle):active { background: #5FB800; border-color: #5FB800; }
+.auth-card .btn:not(.google):not(.subtle):disabled { background: var(--bg-4); color: var(--fg-disabled); border-color: var(--stroke-2); box-shadow: none; }
+.auth-card .btn.google:hover { background: var(--sl-tint); border-color: var(--sl-leaf); }
+.auth-card .btn:focus-visible { outline: 2px solid var(--sl-deep); outline-offset: 2px; }
+.auth-card .input:focus { border-bottom-color: var(--sl-green); box-shadow: inset 0 -2px 0 0 var(--sl-green); }
+.auth-card .input-wrap:focus-within > svg:first-child { color: var(--sl-deep); }
 .auth-divider { display: flex; align-items: center; gap: 12px; color: var(--fg-3); font-size: 12px; }
 .auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--stroke-2); }
 .auth-switch { color: var(--fg-2); font-size: 14px; }
+.auth-switch a.link { font-weight: 600; }
 .auth-legal { font-size: 12px; color: var(--fg-3); text-align: center; margin-top: 8px; }
-.auth-legal a { color: var(--brand-80); }
+.auth-legal a { color: var(--sl-deep); }
 .auth-legal a:hover { text-decoration: underline; }
 
 /* =====================================================================

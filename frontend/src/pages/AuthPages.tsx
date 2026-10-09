@@ -36,7 +36,7 @@ function AuthArt() {
           </div>
         </div>
 
-        <h1>AI email outreach for LED sales teams</h1>
+        <h1>AI email outreach for <span className="auth-hl">LED sales teams</span></h1>
         <p className="auth-purpose">
           Draft, review, and send personalized sales emails from your connected Gmail inbox — grounded
           in your product catalogues, with every AI reply approved by a person.
