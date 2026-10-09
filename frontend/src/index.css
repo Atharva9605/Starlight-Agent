@@ -1180,11 +1180,6 @@ code.inline { font-size: 12px; padding: 1px 6px; border-radius: var(--radius-md)
     radial-gradient(circle at 85% 15%, rgba(255, 255, 255, 0.14), transparent 40%),
     radial-gradient(circle at 10% 90%, rgba(6, 23, 36, 0.35), transparent 45%);
 }
-.auth-art::after {
-  content: ''; position: absolute; left: 0; right: 0; bottom: 18%;
-  height: 3px; background: linear-gradient(90deg, transparent, rgba(156, 203, 245, 0.9), transparent);
-  box-shadow: 0 0 24px 6px rgba(156, 203, 245, 0.35);
-}
 .auth-art-inner { position: relative; z-index: 1; max-width: 520px; display: flex; flex-direction: column; gap: 20px; }
 .auth-art-brand { display: flex; align-items: center; gap: 12px; }
 .auth-art-brand .brand-mark rect:first-child { fill: #fff; }
