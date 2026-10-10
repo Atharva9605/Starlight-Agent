@@ -46,6 +46,25 @@ const GEN_CONCURRENCY = 3
  * truth; this is only a hint so a finished run can still be offered up.
  */
 const RUN_STORAGE_KEY = 'starlight_campaign_run_id'
+/** The review campaign a reloaded review page should pick back up. */
+const REVIEW_STORAGE_KEY = 'starlight_review_run_id'
+
+export function storedReviewRunId(): string | null {
+  try {
+    return localStorage.getItem(REVIEW_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function storeReviewRunId(id: string | null) {
+  try {
+    if (id) localStorage.setItem(REVIEW_STORAGE_KEY, id)
+    else localStorage.removeItem(REVIEW_STORAGE_KEY)
+  } catch {
+    /* private mode — the run is still listed in Campaign runs */
+  }
+}
 
 function runStatusToLocal(status: CampaignRunStatus | string | undefined): RunStatus {
   switch (status) {
@@ -215,6 +234,8 @@ type CampaignValue = {
   removeBulkEdit: (index: number) => void
   clearBulkEdits: () => void
   attachRun: (runId: string) => Promise<CampaignRun | undefined>
+  /** Reopen a review campaign from its server record, e.g. after a reload. */
+  attachReviewRun: (runId: string) => Promise<void>
   dismissFinishedRun: () => void
   /** Pull a lead's email body from the run record (bodies are not kept in state). */
   loadLeadPreview: (index: number) => Promise<void>
@@ -337,6 +358,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     closeReviewRun('stopped')
     reviewRunIdRef.current = null
     setReviewRunId(null)
+    storeReviewRunId(null)
   }
 
   const dismissFinishedRun = useCallback(() => {
@@ -473,6 +495,33 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  /**
+   * Fetch one lead's email body on demand.
+   *
+   * Bodies are deliberately kept out of the event log and out of snapshots (a
+   * few hundred leads is megabytes of markup), so the page asks for the one it
+   * is about to show.
+   */
+  const loadLeadPreview = useCallback(async (index: number) => {
+    const id = runIdRef.current || reviewRunIdRef.current
+    if (!id || index < 0) return
+    if (previewFetchRef.current.has(index)) return
+    previewFetchRef.current.add(index)
+    try {
+      const res = await api.campaignRunLeadHtml(id, index)
+      if (!res.html) return
+      updateLeads((prev) => {
+        const next = prev.map((l, i) => (i === index ? { ...l, _preview_html: res.html } : l))
+        return next
+      })
+      const d = draftsRef.current[index]
+      if (d && !d.html) storeDraft(index, { ...d, html: res.html })
+      setLivePreview((p) => (p && p.rowIndex === index && !p.html ? { ...p, html: res.html } : p))
+    } catch {
+      previewFetchRef.current.delete(index)
+    }
+  }, [])
+
   const selectLead = useCallback((index: number) => {
     currentIndexRef.current = index
     setCurrentIndex(index)
@@ -481,6 +530,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     setChat(chatByLeadRef.current[index] || [])
     const lead = leadsRef.current[index]
     const html = d?.html || lead?._preview_html || ''
+    if (!html && lead?._has_preview) void loadLeadPreview(index)
     if (html) {
       setLivePreview({
         rowIndex: index,
@@ -831,6 +881,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
       })
       reviewRunIdRef.current = res.run_id
       setReviewRunId(res.run_id)
+      storeReviewRunId(res.run_id)
     } catch (e: any) {
       setLogs((prev) => [...prev, `This review won't be listed in Campaign runs: ${e?.message || e}`])
     }
@@ -842,31 +893,6 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
   // -------------------------------------------------------------------------
   // Durable runs: the campaign lives on the server, the tab only watches it
   // -------------------------------------------------------------------------
-
-  /**
-   * Fetch one lead's email body on demand.
-   *
-   * Bodies are deliberately kept out of the event log and out of snapshots (a
-   * few hundred leads is megabytes of markup), so the page asks for the one it
-   * is about to show.
-   */
-  const loadLeadPreview = useCallback(async (index: number) => {
-    const id = runIdRef.current
-    if (!id || index < 0) return
-    if (previewFetchRef.current.has(index)) return
-    previewFetchRef.current.add(index)
-    try {
-      const res = await api.campaignRunLeadHtml(id, index)
-      if (!res.html) return
-      updateLeads((prev) => {
-        const next = prev.map((l, i) => (i === index ? { ...l, _preview_html: res.html } : l))
-        return next
-      })
-      setLivePreview((p) => (p && p.rowIndex === index && !p.html ? { ...p, html: res.html } : p))
-    } catch {
-      previewFetchRef.current.delete(index)
-    }
-  }, [])
 
   /** Fold one pipeline event into local state. Shared by live and replayed feeds. */
   const applyEvent = (evt: any) => {
@@ -1087,6 +1113,105 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     },
     [followRun],
   )
+
+  const attachReviewRun = useCallback(async (id: string) => {
+    if (reviewRunIdRef.current === id && leadsRef.current.length) return
+    setAttaching(true)
+    try {
+      // Restore first: it reopens a closed run, so the snapshot reflects that.
+      const restored = await api.restoreReviewRun(id)
+      const snap = await api.campaignRun(id)
+      forgetRun()
+      runIdRef.current = null
+      stopReviewRef.current = true
+
+      const drafts: Record<number, Draft> = {}
+      for (const d of restored.drafts) {
+        drafts[d.row_index] = {
+          draftId: d.draft_id,
+          rowIndex: d.row_index,
+          website: d.website,
+          company: d.company,
+          subject: d.subject,
+          html: '',
+          to: d.to,
+          from: d.from || undefined,
+        }
+      }
+      // Emails being written when the old tab went away are written again.
+      const runLeads = snap.leads.map((l, i): Lead => {
+        const st = l._state
+        let status = l._status || ''
+        if (drafts[i]) status = '📝 Ready for review'
+        else if (st === 'pending' || st === 'processing') {
+          status = leadHasIdentity(l) ? '⏳ Waiting to generate' : '⏭ Skipped (need company or website)'
+        }
+        return { ...l, _status: status, _draft_id: drafts[i]?.draftId || '', _queued: false }
+      })
+
+      const opts = snap.run.options || {}
+      optsRef.current = {
+        ...optsRef.current,
+        template: opts.template || optsRef.current.template,
+        delay: typeof opts.delay === 'number' ? opts.delay : optsRef.current.delay,
+        recipientOverride: opts.recipient_override || '',
+        senderEmail: opts.sender_email || '',
+        autosend: false,
+        attachProductSheet:
+          typeof opts.attach_product_sheet === 'boolean' ? opts.attach_product_sheet : optsRef.current.attachProductSheet,
+      }
+      setTemplate(optsRef.current.template)
+      setDelay(optsRef.current.delay)
+      setRecipientOverride(optsRef.current.recipientOverride)
+      setSenderEmail(optsRef.current.senderEmail)
+      setAutosend(false)
+      setAttachProductSheet(optsRef.current.attachProductSheet)
+
+      const stages: Record<number, StageEvent[]> = {}
+      runLeads.forEach((l, i) => {
+        if (Array.isArray(l._stages) && l._stages.length) stages[i] = l._stages
+      })
+
+      leadsRef.current = runLeads
+      setLeads(runLeads)
+      draftsRef.current = drafts
+      setDraftsByLead(drafts)
+      chatByLeadRef.current = {}
+      previewFetchRef.current = new Set()
+      setStagesByLead(stages)
+      setLogs(snap.logs || [])
+      setFileName(snap.run.file_name || '')
+      setRunSender(snap.run.sender_email || '')
+      setSendingIndex(null)
+      setBulkSending(false)
+      bulkEditsRef.current = []
+      setBulkEdits([])
+      inflightRef.current = 0
+      setGenerating(false)
+      reviewRunIdRef.current = id
+      setReviewRunId(id)
+      storeReviewRunId(id)
+      pauseRef.current = false
+      stopReviewRef.current = false
+
+      const waiting = runLeads.some((l) => leadState(l) === 'pending' && leadHasIdentity(l))
+      const open = runLeads.some((l) => {
+        const s = leadState(l)
+        return s === 'ready' || s === 'pending'
+      })
+      // Writing the rest costs AI calls, so it waits for an explicit Resume.
+      if (waiting) {
+        pauseRef.current = true
+        setStatus('paused')
+      } else {
+        setStatus(open ? 'reviewing' : 'done')
+      }
+      const first = firstPreviewIndex(runLeads)
+      selectLead(first >= 0 ? first : 0)
+    } finally {
+      setAttaching(false)
+    }
+  }, [selectLead])
 
   /** Hand the campaign to the server and start watching it. */
   const startRun = useCallback(async () => {
@@ -1559,6 +1684,7 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     removeBulkEdit,
     clearBulkEdits,
     attachRun,
+    attachReviewRun,
     dismissFinishedRun,
     loadLeadPreview,
     bulkEdits,

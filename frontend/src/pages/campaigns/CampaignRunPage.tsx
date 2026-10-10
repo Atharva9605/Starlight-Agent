@@ -13,6 +13,7 @@ import {
   SkipForwardTabRegular,
   ClockRegular,
   ArrowDownloadRegular,
+  TaskListSquareLtrRegular,
 } from '@fluentui/react-icons'
 import { api, type CampaignRunSnapshot } from '../../api/client'
 import { EmailPreviewFrame } from '../../components/EmailPreviewFrame'
@@ -76,7 +77,7 @@ function downloadCsv(name: string, leads: Record<string, any>[]) {
 export function CampaignRunPage() {
   const { id = '' } = useParams()
   const nav = useNavigate()
-  const { attachRun } = useCampaign()
+  const { attachRun, attachReviewRun } = useCampaign()
   const [snap, setSnap] = useState<CampaignRunSnapshot | null>(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(0)
@@ -140,6 +141,18 @@ export function CampaignRunPage() {
     }
   }
 
+  const continueReview = async () => {
+    setBusy(true)
+    try {
+      await attachReviewRun(id)
+      nav('/campaigns/review')
+    } catch (e: any) {
+      setError(e?.message || 'Could not reopen this review')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const crumbs = [{ label: 'Campaign runs', to: '/campaigns/runs' }]
 
   if (error && !snap) {
@@ -174,6 +187,7 @@ export function CampaignRunPage() {
   // Failures count as resumable — a resume retries them along with the untouched.
   const canResume =
     run.counts.retriable > 0 && run.status !== 'running' && run.status !== 'reviewing' && !run.options?.review
+  const canReview = Boolean(run.options?.review) && (run.status === 'reviewing' || run.counts.retriable > 0)
   const runBadge = RUN_BADGE[run.status] || { label: run.status, cls: '' }
 
   return (
@@ -204,6 +218,11 @@ export function CampaignRunPage() {
           {run.status === 'running' ? (
             <button className="btn" type="button" onClick={() => void attachRun(id).then(() => nav('/campaigns/live'))}>
               <EyeRegular /> Watch live
+            </button>
+          ) : canReview ? (
+            <button className="btn" type="button" disabled={busy} onClick={() => void continueReview()}>
+              {busy ? <Spinner size="sm" /> : <TaskListSquareLtrRegular />}
+              {busy ? 'Opening…' : 'Continue review'}
             </button>
           ) : canResume ? (
             <button className="btn" type="button" disabled={busy} onClick={() => void resume()}>
@@ -344,7 +363,9 @@ export function CampaignRunPage() {
                       {l._state === 'failed' && l._error ? l._error : l._to || l.website || '—'}
                     </span>
                   </span>
-                  <span className={`badge ${STATE_BADGE[l._state] ?? ''}`}>{l._state}</span>
+                  <span className={`badge ${STATE_BADGE[l._state] ?? ''}`}>
+                    {l._state === 'processing' && /ready for review/i.test(l._status || '') ? 'ready' : l._state}
+                  </span>
                 </button>
               ))}
             </div>

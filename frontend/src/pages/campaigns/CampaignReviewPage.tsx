@@ -23,6 +23,7 @@ import {
   firstPreviewIndex,
   isFailedLead,
   leadState,
+  storedReviewRunId,
   useCampaign,
   type Lead,
 } from '../../campaign/CampaignContext'
@@ -117,7 +118,23 @@ export function CampaignReviewPage() {
     pause,
     resume,
     reset,
+    attaching,
+    attachReviewRun,
   } = useCampaign()
+
+  // A reload empties the tab; pick the review back up from the server.
+  const [restoring, setRestoring] = useState(() => !leads.length && Boolean(storedReviewRunId()))
+  useEffect(() => {
+    if (!restoring) return
+    const id = storedReviewRunId()
+    if (!id) {
+      setRestoring(false)
+      return
+    }
+    attachReviewRun(id)
+      .catch(() => undefined)
+      .finally(() => setRestoring(false))
+  }, [])
 
   const [input, setInput] = useState('')
   const [bulkInput, setBulkInput] = useState('')
@@ -153,6 +170,13 @@ export function CampaignReviewPage() {
     if (next !== undefined) selectLead(next)
   }, [leads, advanceFrom, currentIndex, selectLead])
 
+  if (restoring || (attaching && !leads.length)) {
+    return (
+      <div className="center-fill" style={{ minHeight: '50vh' }}>
+        <Spinner size="lg" label="Reopening your review…" />
+      </div>
+    )
+  }
   if (!leads.length) return <Navigate to="/campaigns/new" replace />
   if (status === 'running') return <Navigate to="/campaigns/live" replace />
 

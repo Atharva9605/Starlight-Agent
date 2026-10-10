@@ -270,26 +270,35 @@ def format_prompt(template: str, **values: Any) -> str:
     return pattern.sub(lambda m: str(values[m.group(0)[1:-1]]), template)
 
 
+_SENDER_ENV = {
+    "sender_name": "SENDER_NAME",
+    "sender_company": "SENDER_COMPANY",
+    "sender_phone": "SENDER_PHONE",
+    "sender_website": "SENDER_WEBSITE",
+    "sender_email": "SENDER_EMAIL",
+    "company_logo_url": "COMPANY_LOGO_URL",
+}
+
+
 def get_sender(organization_id: str | None = None) -> dict:
     config = get_config(organization_id=organization_id)
     sender = config.get("sender", {})
     defaults = _load_defaults().get("sender", {})
+    # Fields saved in Settings beat the env; the env only fills fields nobody saved.
+    # Orgs are seeded with the stock defaults, so a value still equal to its
+    # default counts as never saved.
+    saved = set(config.get("sender_saved_fields") or [])
     merged = {**defaults, **sender}
+    for k, env_key in _SENDER_ENV.items():
+        val = os.getenv(env_key, "").strip()
+        if not val or k in saved:
+            continue
+        current = str(merged.get(k) or "").strip()
+        if not current or current == str(defaults.get(k) or "").strip():
+            merged[k] = val
     sender_overrides = getattr(_preview_local, "sender_overrides", None)
     if sender_overrides:
         merged = {**merged, **{k: v for k, v in sender_overrides.items() if v}}
-    env_map = {
-        "sender_name": "SENDER_NAME",
-        "sender_company": "SENDER_COMPANY",
-        "sender_phone": "SENDER_PHONE",
-        "sender_website": "SENDER_WEBSITE",
-        "sender_email": "SENDER_EMAIL",
-        "company_logo_url": "COMPANY_LOGO_URL",
-    }
-    for k, env_key in env_map.items():
-        val = os.getenv(env_key, "").strip()
-        if val:
-            merged[k] = val
     return merged
 
 
@@ -339,9 +348,12 @@ def update_sender(updates: dict, organization_id: str | None = None) -> dict:
     config = get_config(organization_id=organization_id)
     sender = config.setdefault("sender", {})
     allowed = set(_load_defaults().get("sender", {}).keys())
+    saved = set(config.get("sender_saved_fields") or [])
     for k, v in updates.items():
         if k in allowed:
             sender[k] = v
+            saved.add(k)
+    config["sender_saved_fields"] = sorted(saved)
     return save_config(config, organization_id)
 
 

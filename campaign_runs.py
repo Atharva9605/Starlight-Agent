@@ -142,6 +142,9 @@ def init_campaign_run_tables() -> None:
                 """
             )
             cur.execute(
+                "ALTER TABLE campaign_run_leads ADD COLUMN IF NOT EXISTS draft_id TEXT NOT NULL DEFAULT ''"
+            )
+            cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS campaign_run_events (
                     id BIGSERIAL PRIMARY KEY,
@@ -373,7 +376,7 @@ def get_run_leads(run_id: str, include_html: bool | int = True) -> list[dict[str
             cur.execute(
                 """
                 SELECT row_index, lead, status, state, company, website, to_email,
-                       subject, html, product_count, product_sheet, stages, error
+                       subject, html, product_count, product_sheet, stages, error, draft_id
                 FROM campaign_run_leads
                 WHERE run_id = %s
                 ORDER BY row_index
@@ -411,6 +414,7 @@ def get_run_leads(run_id: str, include_html: bool | int = True) -> list[dict[str
                         "_product_sheet": row[10] or "",
                         "_stages": stages,
                         "_error": row[12] or "",
+                        "_draft_id": row[13] or "",
                     }
                 )
                 out.append(merged)
@@ -752,6 +756,7 @@ def _apply_event_to_lead(cur, run_id: str, payload: dict[str, Any]) -> None:
                 website = COALESCE(NULLIF(%s, ''), website),
                 product_count = %s,
                 product_sheet = %s,
+                draft_id = COALESCE(NULLIF(%s, ''), draft_id),
                 updated_at = NOW()
             WHERE run_id = %s AND row_index = %s
             """,
@@ -763,6 +768,7 @@ def _apply_event_to_lead(cur, run_id: str, payload: dict[str, Any]) -> None:
                 str(payload.get("website") or ""),
                 int(payload.get("product_count") or 0),
                 str(payload.get("product_sheet") or ""),
+                str(payload.get("draft_id") or ""),
                 run_id,
                 idx,
             ),

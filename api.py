@@ -1239,6 +1239,7 @@ async def campaign_generate(req: CampaignGenerateRequest):
             "website": res["website"],
             "product_count": res["product_count"],
             "product_sheet": res["product_sheet"],
+            "draft_id": res["draft_id"],
         },
         {"type": "log", "message": f"Draft ready for {res['website']}"},
         {"type": "status_update", "row_index": idx, "status": "📝 Ready for review"},
@@ -1382,6 +1383,7 @@ async def campaign_revise(draft_id: str, body: CampaignReviseRequest):
             "to": draft.get("to") or "",
             "product_count": draft.get("product_count") or 0,
             "product_sheet": draft.get("product_sheet") or "",
+            "draft_id": draft_id,
         },
     )
     return {
@@ -2143,6 +2145,78 @@ async def finish_campaign_run(run_id: str, body: FinishRunRequest):
         campaign_runs.finish_review_run, run_id, get_organization_id(), status
     )
     return {"status": status if closed else run["status"]}
+
+
+def _awaiting_review(lead: dict) -> bool:
+    status = str(lead.get("_status") or "")
+    return lead.get("_state") == "processing" and bool(lead.get("_preview_html")) and (
+        "ready for review" in status.lower() or "📝" in status
+    )
+
+
+@app.post("/api/campaign/runs/{run_id}/review/restore")
+async def restore_review_run(run_id: str):
+    """
+    Pick a review campaign back up in a fresh tab.
+
+    Returns a sendable draft for every email still awaiting review. Drafts live
+    in memory, so any lost to an API restart are rebuilt from the run record
+    (without the product sheet attachment, like an AI-edited draft).
+    """
+    _require_runs_db()
+    run = _run_or_404(run_id)
+    if not (run.get("options") or {}).get("review"):
+        raise HTTPException(status_code=409, detail="This campaign sent automatically, so there is nothing to review.")
+    org_id = get_organization_id()
+    leads = await asyncio.to_thread(campaign_runs.get_run_leads, run_id, True)
+    if run["status"] != campaign_runs.REVIEW_STATUS and any(
+        l.get("_state") in ("pending", "processing") for l in leads
+    ):
+        await asyncio.to_thread(campaign_runs.reopen_review_run, run_id)
+
+    opts = run.get("options") or {}
+    sender = get_sender()
+    sender_from = f'"{sender.get("sender_name", "")}" <{sender.get("sender_email", "")}>'
+    drafts = []
+    for idx, lead in enumerate(leads):
+        if not _awaiting_review(lead):
+            continue
+        draft_id = lead.get("_draft_id") or ""
+        draft = get_draft(draft_id) if draft_id else None
+        if not draft or draft.get("organization_id") != org_id:
+            draft_id = store_draft({
+                "id": draft_id or None,
+                "organization_id": org_id,
+                "outdir": os.path.join("out_emails_api", org_id, "drafts"),
+                "eml_path": "",
+                "subject": lead.get("_subject") or "",
+                "html": lead.get("_preview_html") or "",
+                "from": sender_from,
+                "to": lead.get("_to") or "",
+                "website": lead.get("website") or "",
+                "company": lead.get("company") or "",
+                "template": opts.get("template") or "email_template.html",
+                "sender_email": opts.get("sender_email") or "",
+                "scraped_data": {},
+                "row_index": idx,
+                "chat": [],
+                "discovered": False,
+                "run_id": run_id,
+                "product_count": lead.get("_product_count") or 0,
+                "product_sheet": lead.get("_product_sheet") or "",
+                "dirty": True,
+            })
+            draft = get_draft(draft_id)
+        drafts.append({
+            "draft_id": draft_id,
+            "row_index": idx,
+            "subject": draft.get("subject") or "",
+            "to": draft.get("to") or "",
+            "from": draft.get("from") or "",
+            "website": draft.get("website") or "",
+            "company": draft.get("company") or "",
+        })
+    return {"drafts": drafts}
 
 
 @app.delete("/api/campaign/runs/{run_id}")

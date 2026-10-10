@@ -430,6 +430,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ status }),
     }),
+  restoreReviewRun: (runId: string) =>
+    request<{
+      drafts: {
+        draft_id: string
+        row_index: number
+        subject: string
+        to: string
+        from: string
+        website: string
+        company: string
+      }[]
+    }>(`/api/campaign/runs/${runId}/review/restore`, { method: 'POST' }),
   deleteCampaignRun: (runId: string) =>
     request(`/api/campaign/runs/${runId}`, { method: 'DELETE' }),
 
