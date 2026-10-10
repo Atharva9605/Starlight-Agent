@@ -40,6 +40,7 @@ def _ingest_inbound_attachment(
     message_id: str,
     gmail_message_id: str | None,
     att_meta: dict,
+    organization_id: str | None = None,
 ) -> None:
     from attachment_store import find_by_gmail_id
     from attachment_service import save_and_ingest, MAX_ATTACHMENT_BYTES
@@ -55,7 +56,7 @@ def _ingest_inbound_attachment(
         except Exception:
             data = None
     if data is None and gmail_att_id and gmail_message_id:
-        data = download_gmail_attachment(gmail_message_id, gmail_att_id)
+        data = download_gmail_attachment(gmail_message_id, gmail_att_id, organization_id=organization_id)
     if not data:
         return
     if len(data) > MAX_ATTACHMENT_BYTES:
@@ -74,7 +75,7 @@ def _ingest_inbound_attachment(
     )
 
 
-def process_inbound_message(gmail_msg: dict) -> dict | None:
+def process_inbound_message(gmail_msg: dict, organization_id: str | None = None) -> dict | None:
     """
     Match inbound Gmail message to a conversation, store it, and generate draft.
     Returns summary dict or None if skipped.
@@ -119,7 +120,7 @@ def process_inbound_message(gmail_msg: dict) -> dict | None:
     # Ingest file attachments into storage + RAG
     for att_meta in gmail_msg.get("attachments") or []:
         try:
-            _ingest_inbound_attachment(conv["id"], msg["id"], gmail_id, att_meta)
+            _ingest_inbound_attachment(conv["id"], msg["id"], gmail_id, att_meta, organization_id)
         except Exception as exc:
             log.warning("Attachment ingest failed: %s", exc)
 
@@ -179,12 +180,12 @@ def run_gmail_sync(organization_id: str | None = None) -> dict:
     state = store.get_gmail_sync_state()
     start_id = state.get("history_id")
 
-    new_messages, latest_id = poll_history_changes(start_id)
+    new_messages, latest_id = poll_history_changes(start_id, organization_id=org)
     processed = 0
     results = []
 
     for gmail_msg in new_messages:
-        result = process_inbound_message(gmail_msg)
+        result = process_inbound_message(gmail_msg, organization_id=org)
         if result:
             processed += 1
             results.append(result)

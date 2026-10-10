@@ -2471,7 +2471,7 @@ async def approve_draft_api(conversation_id: str, message_id: str):
             )
         except Exception:
             pass
-    if send_result.get("thread_id") and not conv.get("gmail_thread_id"):
+    if send_result.get("thread_id") and send_result["thread_id"] != conv.get("gmail_thread_id"):
         await asyncio.to_thread(
             conv_store.update_conversation,
             conversation_id,

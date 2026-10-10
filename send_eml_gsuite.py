@@ -12,6 +12,7 @@ from typing import Optional
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # --- Configuration ---
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -306,7 +307,7 @@ def download_gmail_attachment(message_id: str, attachment_id: str, organization_
     return result
 
 
-def get_message_detail(message_id: str) -> Optional[dict]:
+def get_message_detail(message_id: str, organization_id: str | None = None) -> Optional[dict]:
     def _fetch(svc):
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
         parsed = parse_message_payload(
@@ -317,7 +318,7 @@ def get_message_detail(message_id: str) -> Optional[dict]:
         parsed["label_ids"] = msg.get("labelIds", [])
         return parsed
 
-    result, err = _with_service(_fetch)
+    result, err = _with_service(_fetch, organization_id=organization_id)
     if err:
         log.error("Failed to get message %s: %s", message_id, err)
     return result
@@ -345,7 +346,7 @@ def fetch_thread_messages(thread_id: str) -> list[dict]:
     return result or []
 
 
-def list_recent_inbox_messages(max_results: int = 50) -> list[dict]:
+def list_recent_inbox_messages(max_results: int = 50, organization_id: str | None = None) -> list[dict]:
     def _fetch(svc):
         resp = (
             svc.users()
@@ -355,18 +356,21 @@ def list_recent_inbox_messages(max_results: int = 50) -> list[dict]:
         )
         messages = []
         for item in resp.get("messages", []):
-            detail = get_message_detail(item["id"])
+            detail = get_message_detail(item["id"], organization_id=organization_id)
             if detail:
                 messages.append(detail)
         return messages
 
-    result, err = _with_service(_fetch)
+    result, err = _with_service(_fetch, organization_id=organization_id)
     if err:
         log.error("Failed to list inbox: %s", err)
     return result or []
 
 
-def poll_history_changes(start_history_id: Optional[str]) -> tuple[list[dict], Optional[str]]:
+def poll_history_changes(
+    start_history_id: Optional[str],
+    organization_id: str | None = None,
+) -> tuple[list[dict], Optional[str]]:
     """Incremental sync via users.history.list."""
 
     def _fetch(svc):
@@ -380,7 +384,7 @@ def poll_history_changes(start_history_id: Optional[str]) -> tuple[list[dict], O
             # Backfill the recent inbox instead; process_inbound_message still
             # drops anything that isn't a reply to a known thread.
             log.info("No Gmail history bookmark yet — backfilling recent inbox")
-            return list_recent_inbox_messages(), str(current_history_id)
+            return list_recent_inbox_messages(organization_id=organization_id), str(current_history_id)
 
         new_messages: list[dict] = []
         page_token = None
@@ -400,7 +404,7 @@ def poll_history_changes(start_history_id: Optional[str]) -> tuple[list[dict], O
                     msg_id = msg_meta.get("id")
                     labels = msg_meta.get("labelIds", [])
                     if msg_id and "INBOX" in labels:
-                        detail = get_message_detail(msg_id)
+                        detail = get_message_detail(msg_id, organization_id=organization_id)
                         if detail:
                             new_messages.append(detail)
 
@@ -410,10 +414,18 @@ def poll_history_changes(start_history_id: Optional[str]) -> tuple[list[dict], O
 
         return new_messages, str(current_history_id)
 
-    result, err = _with_service(_fetch)
+    result, err = _with_service(_fetch, organization_id=organization_id)
     if err:
         log.warning("History poll failed (%s), falling back to inbox list", err)
-        return list_recent_inbox_messages(), start_history_id
+        messages = list_recent_inbox_messages(organization_id=organization_id)
+        # Reset the bookmark: one that came from another mailbox or has expired
+        # would otherwise fail on every poll.
+        profile, _ = _with_service(
+            lambda svc: svc.users().getProfile(userId="me").execute(),
+            organization_id=organization_id,
+        )
+        fresh_id = str(profile["historyId"]) if profile and profile.get("historyId") else start_history_id
+        return messages, fresh_id
     return result if result else ([], start_history_id)
 
 
@@ -533,7 +545,15 @@ def send_threaded_reply(
         body["threadId"] = thread_id
 
     def _send(svc):
-        return svc.users().messages().send(userId="me", body=body).execute()
+        try:
+            return svc.users().messages().send(userId="me", body=body).execute()
+        except HttpError as e:
+            # threadId belongs to a different mailbox (or the thread was deleted);
+            # In-Reply-To/References still thread the reply for the recipient.
+            if thread_id and e.resp.status == 404:
+                log.warning("Thread %s not found in sending mailbox — sending unthreaded", thread_id)
+                return svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+            raise
 
     send_result, err = _with_service(_send, organization_id=organization_id)
     if err:
