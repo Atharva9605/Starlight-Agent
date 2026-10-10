@@ -837,6 +837,56 @@ def append_event(run_id: str, payload: dict[str, Any]) -> int:
         conn.close()
 
 
+def lead_log(run_id: str, row_index: int, limit: int = 300) -> list[dict[str, Any]]:
+    """One lead's history as readable lines, oldest first."""
+    if not use_postgres():
+        return []
+    conn = _pg_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT payload, created_at FROM campaign_run_events
+                WHERE run_id = %s AND payload->>'row_index' = %s
+                ORDER BY id LIMIT %s
+                """,
+                (run_id, str(int(row_index)), limit),
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    out: list[dict[str, Any]] = []
+    written = False
+    for payload, created_at in rows:
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        etype = payload.get("type")
+        state = ""
+        if etype == "status_update":
+            text = str(payload.get("status") or "")
+            state = _state_from_status(text)
+        elif etype == "stage":
+            text = str(payload.get("label") or payload.get("stage") or "")
+            state = str(payload.get("state") or "active")
+        elif etype == "lead_resolved":
+            text = f"Website: {payload.get('website') or '—'}"
+        elif etype == "preview_html":
+            subject = payload.get("subject") or "(no subject)"
+            text = f"{'Email updated' if written else 'Email written'}: “{subject}”"
+            if payload.get("to"):
+                text += f" → {payload['to']}"
+            written = True
+            state = "done"
+        elif etype == "log":
+            text = str(payload.get("message") or "")
+        else:
+            continue
+        if text:
+            out.append({"at": _iso(created_at), "type": etype, "text": text, "state": state})
+    return out
+
+
 def events_since(run_id: str, cursor: int = 0, limit: int = 400) -> list[dict[str, Any]]:
     if not use_postgres():
         return []

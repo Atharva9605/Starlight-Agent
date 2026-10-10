@@ -112,6 +112,14 @@ export type CampaignRun = {
   scheduled_at: string | null
 }
 
+export type LeadLogEntry = {
+  at: string | null
+  type: 'status_update' | 'stage' | 'lead_resolved' | 'preview_html' | 'log'
+  text: string
+  /** done / active / error for steps; sent / failed / skipped / processing for statuses. */
+  state: string
+}
+
 /** A run plus every lead's latest state — enough to render it with no replay. */
 export type CampaignRunSnapshot = {
   run: CampaignRun
@@ -417,6 +425,8 @@ export const api = {
   campaignRun: (runId: string) => request<CampaignRunSnapshot>(`/api/campaign/runs/${runId}`),
   campaignRunLeadHtml: (runId: string, rowIndex: number) =>
     request<{ html: string }>(`/api/campaign/runs/${runId}/leads/${rowIndex}/html`),
+  campaignRunLeadLog: (runId: string, rowIndex: number) =>
+    request<{ entries: LeadLogEntry[] }>(`/api/campaign/runs/${runId}/leads/${rowIndex}/log`),
   pauseCampaignRun: (runId: string) =>
     request<{ status: string }>(`/api/campaign/runs/${runId}/pause`, { method: 'POST' }),
   resumeCampaignRun: (runId: string) =>

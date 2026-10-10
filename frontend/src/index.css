@@ -1050,6 +1050,12 @@ a.kpi:hover { box-shadow: var(--shadow-8); }
 .step-item-title { font-weight: 600; font-size: 13px; }
 .step-item.pending .step-item-title { color: var(--fg-3); font-weight: 400; }
 .step-item-sub { font-size: 12px; color: var(--fg-3); }
+.lead-log .step-item { border-bottom: 1px solid var(--stroke-2); padding: 8px 0; }
+.lead-log .step-item:last-child { border-bottom: 0; }
+.lead-log .step-item-title,
+.lead-log-text { font-size: 13px; overflow-wrap: anywhere; }
+.lead-log-text { color: var(--fg-2); }
+.lead-log .step-item.error .step-item-title { color: var(--danger-fg); }
 
 .queue { display: flex; flex-direction: column; max-height: 360px; overflow: auto; margin: 0 -8px; }
 .queue-row {

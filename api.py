@@ -1204,7 +1204,7 @@ async def _record_review(run_id: Optional[str], *payloads: dict, settle: bool = 
 def _review_failure(idx: int, err: str) -> tuple[dict, ...]:
     return (
         _stage_payload(idx, "error", err[:120], "error"),
-        {"type": "log", "message": f"Lead {idx + 1} failed: {err}"},
+        {"type": "log", "row_index": idx, "message": f"Lead {idx + 1} failed: {err}"},
         {"type": "status_update", "row_index": idx, "status": f"❌ {err[:120]}"},
     )
 
@@ -1241,18 +1241,23 @@ async def campaign_generate(req: CampaignGenerateRequest):
             "product_sheet": res["product_sheet"],
             "draft_id": res["draft_id"],
         },
-        {"type": "log", "message": f"Draft ready for {res['website']}"},
+        {"type": "log", "row_index": idx, "message": f"Draft ready for {res['website']}"},
         {"type": "status_update", "row_index": idx, "status": "📝 Ready for review"},
     )
     return res
 
 
 async def _generate_campaign_draft(req: CampaignGenerateRequest, run_id: Optional[str]) -> dict:
+    idx = req.row_index
     lead = dict(req.lead or {})
     had_website = bool(clean_lead_value(lead.get("website")))
     exclude = list(req.exclude_websites or [])
     if req.force_discover and had_website:
         exclude.append(str(lead.get("website") or ""))
+    discovering = req.force_discover or not had_website
+    if discovering:
+        name = lead_search_name(lead) or "company"
+        await _record_review(run_id, _stage_payload(idx, "discover", f"Finding website for {name} (OpenSERP)"))
     try:
         website = await run_in_thread(
             ensure_lead_website,
@@ -1262,6 +1267,8 @@ async def _generate_campaign_draft(req: CampaignGenerateRequest, run_id: Optiona
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if discovering:
+        await _record_review(run_id, _stage_payload(idx, "discover", f"Found {website}", "done"))
 
     org_id = get_organization_id()
     outdir = os.path.join("out_emails_api", org_id, "drafts")
@@ -1269,9 +1276,15 @@ async def _generate_campaign_draft(req: CampaignGenerateRequest, run_id: Optiona
 
     original_website = website
     scraped_data = None
-    used_openserp = req.force_discover or not had_website
+    used_openserp = discovering
+    await _record_review(run_id, _stage_payload(idx, "scrape", f"Scraping {website}"))
     website, scraped_data, fallback = await _scrape_with_openserp_fallback(lead, website)
     used_openserp = used_openserp or fallback
+    if fallback and scraped_data:
+        await _record_review(
+            run_id,
+            _stage_payload(idx, "discover", f"Could not scrape {original_website} · OpenSERP found {website}", "done"),
+        )
     if not scraped_data:
         name = lead_search_name(lead) or "this company"
         raise HTTPException(
@@ -1288,6 +1301,11 @@ async def _generate_campaign_draft(req: CampaignGenerateRequest, run_id: Optiona
     if company_hint:
         scraped_data.setdefault("company", company_hint)
     scraped_data["website"] = website
+    await _record_review(
+        run_id,
+        _stage_payload(idx, "scrape", "Website profile ready", "done"),
+        _stage_payload(idx, "retrieve", "Matching catalogue & writing email"),
+    )
 
     result = await run_in_thread(
         generate_eml_from_record,
@@ -1300,6 +1318,14 @@ async def _generate_campaign_draft(req: CampaignGenerateRequest, run_id: Optiona
     if not result:
         raise HTTPException(status_code=500, detail="Email generation failed.")
     eml_path, trace_info = result
+    n_products = len((trace_info or {}).get("product_refs") or [])
+    await _record_review(
+        run_id,
+        _stage_payload(
+            idx, "retrieve", f"Matched {n_products} catalogue product{'s' if n_products != 1 else ''}", "done"
+        ),
+        _stage_payload(idx, "draft", "Draft written", "done"),
+    )
     html = (trace_info or {}).get("html") or ""
     if not html:
         html_path = Path(eml_path).with_suffix(".html")
@@ -1444,7 +1470,7 @@ async def campaign_send(draft_id: str):
     await _record_review(
         run_id,
         _stage_payload(idx, "send", "Sent", "done"),
-        {"type": "log", "message": f"Sent to {recipient_email or 'recipient'} · {draft.get('company') or draft.get('website') or f'lead {idx + 1}'}"},
+        {"type": "log", "row_index": idx, "message": f"Sent to {recipient_email or 'recipient'} · {draft.get('company') or draft.get('website') or f'lead {idx + 1}'}"},
         {"type": "status_update", "row_index": idx, "status": "✅ Sent"},
         settle=True,
     )
@@ -1465,7 +1491,7 @@ async def campaign_discard(draft_id: str):
     idx = draft.get("row_index", 0)
     await _record_review(
         draft.get("run_id"),
-        {"type": "log", "message": f"Discarded lead {idx + 1}"},
+        {"type": "log", "row_index": idx, "message": f"Discarded lead {idx + 1}"},
         {"type": "status_update", "row_index": idx, "status": "⏭ Discarded"},
         settle=True,
     )
@@ -1544,6 +1570,7 @@ async def campaign_event_stream(
             }
             yield {
                 "type": "log",
+                "row_index": idx,
                 "message": f"Skipping lead {idx + 1}: need website or company/name",
             }
             return
@@ -1560,6 +1587,7 @@ async def campaign_event_stream(
                 yield _stage_payload(idx, "discover", f"Finding website for {search_name}")
                 yield {
                     "type": "log",
+                    "row_index": idx,
                     "message": f"OpenSERP lookup: {search_name}",
                 }
                 try:
@@ -1584,7 +1612,7 @@ async def campaign_event_stream(
                 website = await run_in_thread(ensure_lead_website, row)
 
             yield _stage_payload(idx, "scrape", "Scraping website")
-            yield {"type": "log", "message": f"Scraping: {website}"}
+            yield {"type": "log", "row_index": idx, "message": f"Scraping: {website}"}
 
             original_website = website
             scraped_data = None
@@ -1602,6 +1630,7 @@ async def campaign_event_stream(
                 )
                 yield {
                     "type": "log",
+                    "row_index": idx,
                     "message": f"Could not scrape {original_website}; OpenSERP → {website}",
                 }
                 yield {
@@ -1633,7 +1662,7 @@ async def campaign_event_stream(
             yield _stage_payload(idx, "analyze", "Company analyzed", "done")
 
             yield _stage_payload(idx, "retrieve", "Matching catalogue & writing email")
-            yield {"type": "log", "message": f"Generating EML for: {website}"}
+            yield {"type": "log", "row_index": idx, "message": f"Generating EML for: {website}"}
 
             eml_path, trace_info = await run_in_thread(
                 generate_eml_from_record,
@@ -1726,7 +1755,7 @@ async def campaign_event_stream(
                 "send",
                 f"Sending via Gmail{f' as {sender_from}' if sender_from else ''}",
             )
-            yield {"type": "log", "message": f"Sending email via Gmail for {website}"}
+            yield {"type": "log", "row_index": idx, "message": f"Sending email via Gmail for {website}"}
             async with send_lock:
                 send_result = await run_in_thread(
                     send_email_gsuite, eml_path, sender_email or sender_from or None, org_id
@@ -1766,12 +1795,12 @@ async def campaign_event_stream(
                         gmail_message_id=send_result.get("message_id") or "",
                         gmail_thread_id=send_result.get("thread_id") or "",
                     )
-                    yield {"type": "log", "message": f"Conversation created for {recipient_email}"}
+                    yield {"type": "log", "row_index": idx, "message": f"Conversation created for {recipient_email}"}
                 except Exception as conv_err:
-                    yield {"type": "log", "message": f"Warning: conversation not saved: {conv_err}"}
+                    yield {"type": "log", "row_index": idx, "message": f"Warning: conversation not saved: {conv_err}"}
 
             yield _stage_payload(idx, "send", "Sent", "done")
-            yield {"type": "log", "message": f"Email sent successfully for: {website}"}
+            yield {"type": "log", "row_index": idx, "message": f"Email sent successfully for: {website}"}
             yield {"type": "status_update", "row_index": idx, "status": "✅ Sent"}
 
         except Exception as e:
@@ -1787,7 +1816,7 @@ async def campaign_event_stream(
                 status_msg = f"❌ Failed: {err_msg[:50]}..."
 
             yield _stage_payload(idx, "error", err_msg[:120], "error")
-            yield {"type": "log", "message": log_msg}
+            yield {"type": "log", "row_index": idx, "message": log_msg}
             yield {"type": "status_update", "row_index": idx, "status": status_msg}
 
     slots = asyncio.Semaphore(CAMPAIGN_CONCURRENCY)
@@ -1801,7 +1830,7 @@ async def campaign_event_stream(
             async for payload in process_lead(idx, row):
                 await events.put(payload)
         except Exception as e:  # noqa: BLE001 - process_lead records its own failures
-            await events.put({"type": "log", "message": f"Lead {idx + 1} stopped unexpectedly: {e}"})
+            await events.put({"type": "log", "row_index": idx, "message": f"Lead {idx + 1} stopped unexpectedly: {e}"})
         finally:
             slots.release()
 
@@ -2022,6 +2051,14 @@ async def get_campaign_run_lead_html(run_id: str, row_index: int):
     _run_or_404(run_id)
     html = await asyncio.to_thread(campaign_runs.lead_html, run_id, row_index)
     return {"html": html}
+
+
+@app.get("/api/campaign/runs/{run_id}/leads/{row_index}/log")
+async def get_campaign_run_lead_log(run_id: str, row_index: int):
+    _require_runs_db()
+    _run_or_404(run_id)
+    entries = await asyncio.to_thread(campaign_runs.lead_log, run_id, row_index)
+    return {"entries": entries}
 
 
 @app.get("/api/campaign/runs/{run_id}/stream")

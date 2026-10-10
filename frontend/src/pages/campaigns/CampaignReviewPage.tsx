@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   AddRegular,
@@ -7,6 +7,7 @@ import {
   CheckmarkCircleRegular,
   DeleteRegular,
   DismissRegular,
+  DocumentTextRegular,
   ErrorCircleRegular,
   MailInboxRegular,
   MailRegular,
@@ -19,6 +20,7 @@ import {
   TaskListSquareLtrRegular,
 } from '@fluentui/react-icons'
 import { EmailPreviewFrame } from '../../components/EmailPreviewFrame'
+import { LeadLogDrawer } from '../../components/LeadLogDrawer'
 import {
   firstPreviewIndex,
   isFailedLead,
@@ -120,7 +122,11 @@ export function CampaignReviewPage() {
     reset,
     attaching,
     attachReviewRun,
+    stagesByLead,
   } = useCampaign()
+
+  const [logIndex, setLogIndex] = useState<number | null>(null)
+  const closeLog = useCallback(() => setLogIndex(null), [])
 
   // A reload empties the tab; pick the review back up from the server.
   const [restoring, setRestoring] = useState(() => !leads.length && Boolean(storedReviewRunId()))
@@ -534,6 +540,15 @@ export function CampaignReviewPage() {
                           </span>
                           <span className="mail-card-meta">{l._failed_website || l.website || 'No website'}</span>
                         </span>
+                        <button
+                          className="btn subtle icon-only sm"
+                          type="button"
+                          aria-label={`View log for ${leadTitle(l, `lead ${i + 1}`)}`}
+                          title="View log"
+                          onClick={() => setLogIndex(i)}
+                        >
+                          <DocumentTextRegular />
+                        </button>
                         {retrying ? (
                           <Spinner size="sm" />
                         ) : (
@@ -563,27 +578,34 @@ export function CampaignReviewPage() {
                 {focusSite ? ` · ${focusSite}` : ''}
               </span>
             </div>
-            {focusFailed ? null : (
-              <div className="reader-head-actions">
-                <button className="btn subtle" type="button" disabled={!canAct || acting} onClick={() => {
-                  setAdvanceFrom(currentIndex)
-                  void discardLead(currentIndex)
-                }}>
-                  <DeleteRegular /> Discard
+            <div className="reader-head-actions">
+              {focus ? (
+                <button className="btn subtle" type="button" onClick={() => setLogIndex(currentIndex)}>
+                  <DocumentTextRegular /> View log
                 </button>
-                <button className="btn secondary" type="button" disabled={!canAct || acting} onClick={() => queueLead(currentIndex)}>
-                  {focusState === 'queued' ? <TaskListSquareLtrRegular /> : <TaskListAddRegular />}
-                  {focusState === 'queued' ? 'Remove from bulk' : 'Add to bulk'}
-                </button>
-                <button className="btn" type="button" disabled={!canAct || acting} onClick={() => {
-                  setAdvanceFrom(currentIndex)
-                  void sendLead(currentIndex)
-                }}>
-                  {sendingThis ? <Spinner size="sm" /> : <SendRegular />}
-                  {sendingThis ? 'Sending…' : 'Send now'}
-                </button>
-              </div>
-            )}
+              ) : null}
+              {focusFailed ? null : (
+                <>
+                  <button className="btn subtle" type="button" disabled={!canAct || acting} onClick={() => {
+                    setAdvanceFrom(currentIndex)
+                    void discardLead(currentIndex)
+                  }}>
+                    <DeleteRegular /> Discard
+                  </button>
+                  <button className="btn secondary" type="button" disabled={!canAct || acting} onClick={() => queueLead(currentIndex)}>
+                    {focusState === 'queued' ? <TaskListSquareLtrRegular /> : <TaskListAddRegular />}
+                    {focusState === 'queued' ? 'Remove from bulk' : 'Add to bulk'}
+                  </button>
+                  <button className="btn" type="button" disabled={!canAct || acting} onClick={() => {
+                    setAdvanceFrom(currentIndex)
+                    void sendLead(currentIndex)
+                  }}>
+                    {sendingThis ? <Spinner size="sm" /> : <SendRegular />}
+                    {sendingThis ? 'Sending…' : 'Send now'}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {previewHtml && !focusFailed ? (
@@ -645,6 +667,17 @@ export function CampaignReviewPage() {
           )}
         </section>
       </div>
+
+      {logIndex !== null && leads[logIndex] ? (
+        <LeadLogDrawer
+          runId={reviewRunId}
+          rowIndex={logIndex}
+          lead={leads[logIndex]}
+          live={leadState(leads[logIndex]) === 'processing'}
+          localStages={stagesByLead[logIndex]}
+          onClose={closeLog}
+        />
+      ) : null}
     </div>
   )
 }

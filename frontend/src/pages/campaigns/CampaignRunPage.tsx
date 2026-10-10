@@ -14,9 +14,11 @@ import {
   ClockRegular,
   ArrowDownloadRegular,
   TaskListSquareLtrRegular,
+  DocumentTextRegular,
 } from '@fluentui/react-icons'
 import { api, type CampaignRunSnapshot } from '../../api/client'
 import { EmailPreviewFrame } from '../../components/EmailPreviewFrame'
+import { LeadLogDrawer } from '../../components/LeadLogDrawer'
 import { useCampaign } from '../../campaign/CampaignContext'
 import { CardHeader, EmptyState, MessageBar, PageHeader, Spinner } from '../../components/ui'
 import { formatWhen, runLabel } from './CampaignRunsPage'
@@ -83,6 +85,8 @@ export function CampaignRunPage() {
   const [selected, setSelected] = useState(0)
   const [busy, setBusy] = useState(false)
   const [leadFilter, setLeadFilter] = useState<LeadFilter>('all')
+  const [logOpen, setLogOpen] = useState(false)
+  const closeLog = useCallback(() => setLogOpen(false), [])
   // Bodies are not shipped with the snapshot; they are pulled per lead.
   const [bodies, setBodies] = useState<Record<number, string>>({})
 
@@ -290,9 +294,16 @@ export function CampaignRunPage() {
               </>
             }
             actions={
-              <span className={`badge ${STATE_BADGE[lead?._state] ?? ''}`}>
-                {lead?._status || lead?._state || 'pending'}
-              </span>
+              <div className="row nowrap" style={{ gap: 8 }}>
+                <span className={`badge ${STATE_BADGE[lead?._state] ?? ''}`}>
+                  {lead?._status || lead?._state || 'pending'}
+                </span>
+                {lead ? (
+                  <button className="btn subtle sm" type="button" onClick={() => setLogOpen(true)}>
+                    <DocumentTextRegular /> View log
+                  </button>
+                ) : null}
+              </div>
             }
           />
 
@@ -379,6 +390,16 @@ export function CampaignRunPage() {
           ) : null}
         </aside>
       </div>
+
+      {logOpen && lead ? (
+        <LeadLogDrawer
+          runId={id}
+          rowIndex={selected}
+          lead={lead}
+          live={(run.status === 'running' || run.status === 'reviewing') && lead._state === 'processing'}
+          onClose={closeLog}
+        />
+      ) : null}
     </div>
   )
 }
